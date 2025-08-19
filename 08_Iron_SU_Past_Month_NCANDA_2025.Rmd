@@ -1,0 +1,3340 @@
+---
+title: "Age-Related Changes in Tissue Iron and Relationships with Substance Use"
+author: Ashley C. Parr
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output: pdf_document
+---
+
+# TISSUE IRON  
+
+```{r, include=FALSE}
+
+if(!is.null(dev.list())) dev.off()# Clear plots
+cat("\014") # Clear console
+rm(list=ls())# Clean workspace
+
+library(rmarkdown)
+library(tinytex)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(LNCDR)
+library(mgcv)
+library(readr)
+library(RColorBrewer)
+library(ggpubr)
+library(plotrix)
+library(ggeffects)
+
+knitr::opts_chunk$set(out.width="50%", out.height="50%", warning = FALSE, 
+                      fig.pos = 'H', dev = 'png', dpi=150)
+
+
+library(showtext)
+font_add("Arial", "/System/Library/Fonts/Supplemental/Arial.ttf")  # Use the actual file path
+showtext_auto()
+
+```      
+
+# Housekeeping
+## Bring in Relevant Files, Merge, & Clean  
+```{r, echo=FALSE}
+
+All_Sites_Iron <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/ALL_SITES_IRON_CLEANED_y8.csv"
+All_Sites_Iron <- read.csv(All_Sites_Iron)
+
+All_Sites_Substance <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/ALL_SITES_SUBSTANCE_CLEANED_y8_newnicotine_08042025.RData"
+All_Sites_Substance1 <- load(All_Sites_Substance)
+
+Long_Substance <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/LONG_SUBSTANCE_y8_newnicotine_08042025.RData"
+Long_Substance1 <- load(Long_Substance)
+
+# # #Get rid of 'all' since using probabilistic score 
+Long_Substance <- Long_Substance %>% filter(Substance!="All" & Substance !="All Mean")
+
+Long_Substance$Substance <- droplevels(Long_Substance$Substance)
+Long_Substance$oSubstance <- droplevels(Long_Substance$oSubstance)
+
+
+# Clean Iron 
+
+#RM stuff in all sites substance
+All_Sites_Iron <- dplyr::select(All_Sites_Iron, subject, visit, roi, site, sex, visit_age, 
+                                tat2.combat, tat2.combat_z)
+
+All_Sites_Iron$roi[All_Sites_Iron$roi=="striatum"] <- "BG"
+All_Sites_Iron$roi[All_Sites_Iron$roi=="pallidum"] <- "Pallidum"
+All_Sites_Iron$roi[All_Sites_Iron$roi=="caudate"] <- "Caudate"
+All_Sites_Iron$roi[All_Sites_Iron$roi=="nacc"] <- "NAcc"
+All_Sites_Iron$roi[All_Sites_Iron$roi=="putamen"] <- "Putamen"
+
+columns_to_factorize <- colnames(All_Sites_Iron)[grep("high", colnames(All_Sites_Iron))]
+ 
+# Factorize columns
+for (col in columns_to_factorize) {
+  All_Sites_Iron[[col]] <- factor(All_Sites_Iron[[col]])
+} 
+ 
+All_Sites_Iron$site <- as.factor(All_Sites_Iron$site)
+All_Sites_Iron$subject <- as.factor(All_Sites_Iron$subject)
+All_Sites_Iron$sex<- as.factor(All_Sites_Iron$sex)
+All_Sites_Iron$oROI <- ordered(All_Sites_Iron$roi, levels = c("BG", "NAcc","Putamen",
+                                                              "Caudate","Pallidum"))
+ 
+
+All_Sites_Iron$oROI2 <- ordered(All_Sites_Iron$oROI, levels = c( "BG","NAcc", "Pallidum","Putamen", 
+                                                                          "Caudate"))
+
+All_Sites_Iron_Long <- merge(All_Sites_Iron, Long_Substance, by = c("subject", "visit",
+                                                                    "site", "sex",
+                                                                    "visit_age"),
+                             all.y = TRUE)%>% filter(!is.na(tat2.combat))
+
+
+All_Sites_Iron <- merge(All_Sites_Iron, All_Sites_Substance, by = c("subject","visit",
+                                                                    "site", "sex", 
+                                                                    "visit_age"),
+                        all.y = TRUE) %>% filter(!is.na(tat2.combat))
+
+  
+```    
+ 
+## Calculate Summary Stats: Mean, Peak ages, Peak nT2*w, ETC. Across full sample & Demographic Factors 
+
+```{r, echo=FALSE, fig.align = "center"}
+
+# Note: peak is MIN for iron since inverse relationship between nT2*w and iron content 
+
+All_Sites_Iron <- All_Sites_Iron %>%
+  group_by(subject, oROI) %>%
+    dplyr::mutate(
+    valid_scores = !is.na(tat2.combat),
+    peak_age_Iron = if(any(valid_scores)) visit_age[which.min(ifelse(valid_scores, tat2.combat, -Inf))] else NA_real_,
+    peak_Iron = if(any(valid_scores)) min(tat2.combat, na.rm = TRUE) else NA_real_  # Changed this line!
+  ) %>% 
+  dplyr::select(-valid_scores)
+
+
+subscale_summary <- All_Sites_Iron %>%
+  group_by(oROI) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_Iron = mean(tat2.combat[oROI == cur_group()$oROI], na.rm = TRUE),
+    sd_Iron = std.error(tat2.combat[oROI == cur_group()$oROI], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_Iron = mean(peak_Iron, na.rm = TRUE),
+    sd_peak_Iron = std.error(peak_Iron, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_Iron = mean(peak_age_Iron, na.rm = TRUE),
+    SD_peak_age_Iron = std.error(peak_age_Iron, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_Iron)),
+    .groups = "drop"
+  )
+  
+
+# subscale_summary[] <- lapply(subscale_summary, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+write.csv(subscale_summary, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Summary_Table_Across_IronROIs_FullSample.csv', row.names = FALSE)
+
+
+subscale_summary_sex <- All_Sites_Iron %>%
+  group_by(oROI, sex) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_Iron = mean(tat2.combat[oROI == cur_group()$oROI], na.rm = TRUE),
+    sd_Iron = std.error(tat2.combat[oROI == cur_group()$oROI], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_Iron = mean(peak_Iron, na.rm = TRUE),
+    sd_peak_Iron = std.error(peak_Iron, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_Iron = mean(peak_age_Iron, na.rm = TRUE),
+    SD_peak_age_Iron = std.error(peak_age_Iron, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_Iron)),
+    .groups = "drop"
+  )
+  
+
+subscale_summary_income <- All_Sites_Iron %>%
+  group_by(oROI, oIncome_recode) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_Iron = mean(tat2.combat[oROI == cur_group()$oROI], na.rm = TRUE),
+    sd_Iron = std.error(tat2.combat[oROI == cur_group()$oROI], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_Iron = mean(peak_Iron, na.rm = TRUE),
+    sd_peak_Iron = std.error(peak_Iron, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_Iron = mean(peak_age_Iron, na.rm = TRUE),
+    SD_peak_age_Iron = std.error(peak_age_Iron, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_Iron)),
+    .groups = "drop"
+  )
+
+
+subscale_summary_race <- All_Sites_Iron %>%
+  group_by(oROI, oRaceeth_recode) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_Iron = mean(tat2.combat[oROI == cur_group()$oROI], na.rm = TRUE),
+    sd_Iron = std.error(tat2.combat[oROI == cur_group()$oROI], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_Iron = mean(peak_Iron, na.rm = TRUE),
+    sd_peak_Iron = std.error(peak_Iron, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_Iron = mean(peak_age_Iron, na.rm = TRUE),
+    SD_peak_age_Iron = std.error(peak_age_Iron, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_Iron)),
+    .groups = "drop"
+  )
+
+
+
+subscale_summary_site <- All_Sites_Iron %>%
+  group_by(oROI, site) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_Iron = mean(tat2.combat[oROI == cur_group()$oROI], na.rm = TRUE),
+    sd_Iron = std.error(tat2.combat[oROI == cur_group()$oROI], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_Iron = mean(peak_Iron, na.rm = TRUE),
+    sd_peak_Iron = std.error(peak_Iron, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_Iron = mean(peak_age_Iron, na.rm = TRUE),
+    SD_peak_age_Iron = std.error(peak_age_Iron, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_Iron)),
+    .groups = "drop"
+  )
+
+
+subscale_summary_sex <- subscale_summary_sex %>%
+  dplyr::rename(Label = sex)
+subscale_summary_income <- subscale_summary_income %>%
+  dplyr::rename(Label = oIncome_recode)
+subscale_summary_race <- subscale_summary_race %>%
+  dplyr::rename(Label = oRaceeth_recode)
+subscale_summary_site <- subscale_summary_site %>%
+ dplyr::rename(Label = site)
+subscale_summary$Label <- "All"
+
+Long_means_all_SES <- rbind(subscale_summary_sex, subscale_summary_income, 
+                            subscale_summary_race, subscale_summary_site,subscale_summary)
+
+
+
+# Long_means_all_SES[] <- lapply(Long_means_all_SES, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+
+custom_order <- c("BG", "Caudate", "NAcc", "Pallidum", "Putamen")
+
+# Convert to factor with levels in custom order
+Long_means_all_SES <- Long_means_all_SES %>%
+  mutate(oROI = factor(oROI, levels = custom_order)) %>%
+  arrange(oROI)
+ 
+
+write.csv(Long_means_all_SES, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Summary_Table_Across_IronROIs_SES.csv', row.names = FALSE)
+ 
+Nsubs <- dplyr::select(All_Sites_Iron[!is.na(All_Sites_Iron$tat2.combat),], visit, visit_age, subject, sex)
+Nsubs <- unique(Nsubs)
+
+
+``` 
+
+## Clean Environment 
+```{r, echo = FALSE, fig.align='center'}
+
+rm(list=ls()[! ls() %in% c("All_Sites_Iron","All_Sites_Substance","Five_Cat_SU_Iron",
+                           "Three_Cat_SU_Iron", "Five_Cat_SU", "Three_Cat_SU",
+                           "Anti_Saccade","Anti_Saccade_Iron", "All_Sites_Iron_Long", 
+                           "demolistdf","demolist","NCANDAwithalldemfortable",
+                           "SUlistdf", "SUlist", "NCANDAwithallSUfortable", 
+                           "nT2listdf", "nT2list", "NCANDAwithallnT2fortable","Long_Substance",
+                           "peakdens.first_age","peakdens.reg_age",
+                           "NAcc_Iron_Substance_Mod", "Alcohol_Iron_Substance_Mod", "Binge_Iron_Substance_Mod","Long_Iron_means","Long_Iron_means_sex","Long_Iron_means_income","Long_Iron_means_race", 
+                           "Long_Iron_means_site", "Long_Iron_grmeans", "peakdens.peak_age", "Long_Iron_peak_means_sex",
+                           "Long_Iron_peak_means_income","Long_Iron_peak_means_race","Long_Iron_peak_means_site",
+                           "Long_peak_means_all_SES", "Long_means_all_SES", "Demo_All_violin", "subscale_summary"
+                           )])
+
+
+``` 
+
+## Set colors  
+```{r, echo = FALSE, fig.align='center'}
+
+substance_colorbar <- c("#260C51", "#EA464C", "#7B02A8", "#079287", "#EAB720")
+substance_colorbar2 <- c("#260C51", "#EA464C", "#079287", "#EAB720", "#7B02A8")
+
+
+iron_colorbar <- c("#461248","#A02F7B","#7F4598","#C196C4","#c47c9e")
+iron_colorbar2 <- c("#461248","#A02F7B","#c47c9e","#7F4598","#C196C4")
+
+
+
+library(scales)
+Demo_Colors <- colorRampPalette(c("#F5F5F9","#461248"))(length(unique(Long_means_all_SES$Label)))
+
+``` 
+
+## Subset DFs
+```{r, echo = FALSE, fig.align='center'}
+
+set.seed(1) #for consistency in derivatives + derivative credible intervals
+
+ 
+### Subset DF 
+Iron <- All_Sites_Iron %>% dplyr::select(subject, visit, sex, visit_age, site,
+                                                    oIncome_recode,oRaceeth_recode,
+                                                    tat2.combat, roi, oROI,oROI2) %>% filter (!is.na(oROI))
+Iron$roi <- as.factor(Iron$roi)
+
+
+``` 
+
+# Test for Differences in nT2*w Magnitude/Mean/Peak across ROIs and Demographic Factors 
+## Full Sample
+```{r, echo = FALSE, fig.align='center'}
+
+# Across Substances 
+gam.model_Iron <- mgcv::gamm(
+  tat2.combat ~ s(visit_age, k = 4, fx = F, bs = "cs") + oROI + sex + oIncome_recode + oRaceeth_recode + site,
+  random = list(subject = ~1, subject = ~0 + visit_age),  # <- combined intercept & slope
+  data = Iron %>% 
+    filter(oROI != "BG"),
+  method = "REML")
+summary(gam.model_Iron$gam)
+anova(gam.model_Iron$gam)  
+ 
+``` 
+
+### Plots: 
+```{r, echo = FALSE, fig.align='center'}
+ 
+# Violin plot showing distribution + Mean 
+Iron_violin <- All_Sites_Iron %>%
+  ggplot( aes(x=oROI2, y=tat2.combat, fill=oROI2, color=oROI2)) +
+  scale_color_manual(values=iron_colorbar2)+ 
+   scale_fill_manual(values=iron_colorbar2)+  
+    geom_violin(width=1, size=0.4,adjust = 2) +
+      stat_summary(fun = mean, geom = "point", shape = 15, size = 3, color = "black") +   
+    theme(aspect.ratio=1.5, legend.position = "none",
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+  labs(y = "\nnT2*w",
+       x = "ROI\n") +
+  scale_x_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+    coord_flip() + # This switch X and Y axis and allows to get the horizontal version
+    scale_y_continuous(trans = "reverse")
+print(Iron_violin)
+
+peakdens.peak_age = dplyr::select(All_Sites_Iron[!is.na(All_Sites_Iron$peak_age_Iron),],
+                             oROI, peak_age_Iron) %>%
+                               group_by(oROI) %>%
+                               summarise(Max_Dense = density(peak_age_Iron)$x[which.max(density(peak_age_Iron, na.rm=T)$y)])
+
+# Density plot showing distributions of peak ages 
+Iron_dense_peak <- ggplot(All_Sites_Iron, aes(x = peak_age_Iron, group = oROI, colour = oROI)) +
+  scale_color_manual(values=iron_colorbar)+
+  geom_density(linewidth = 1, bw = .80) + 
+   theme(aspect.ratio=1.5, legend.position = "none",
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+    scale_x_continuous(limits = c(10, 30), breaks = seq(10, 30, by = 10))+
+    # geom_vline(data = peakdens.peak_age, aes(xintercept=Max_Dense,color = oROI), linetype="dashed") +
+         labs(x = "\nAge of Peak nT2*w",
+       y = "Density\n")
+plot(Iron_dense_peak)
+ 
+Iron_Dists <- ggarrange(Iron_violin, Iron_dense_peak, 
+                    ncol = 3, nrow = 1)
+Iron_Dists
+
+ggsave(Iron_Dists, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Distributions_AllROIs.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+    
+subscale_summary <- subscale_summary[!is.na(subscale_summary$oROI),]
+subscale_summary$oROI<-ordered(subscale_summary$oROI,
+levels=c("BG", "NAcc", "Putamen","Pallidum", "Caudate"))
+
+  
+#Mean Iron
+p1_5 <- subscale_summary %>% ungroup () %>%  
+  ggplot(aes(x = mean_Iron, y = oROI, fill = oROI)) +  
+  geom_point(shape = 21, size = 5.5, color = "white") +
+        scale_x_continuous(trans = "reverse", limits = c(.015, .010), breaks = c(.015, .0125, .010))+ 
+  scale_fill_manual(values = iron_colorbar2) +
+  labs(x = "\nnT2*w",
+       y = "ROI\n") +
+  scale_y_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p1_5)
+ 
+#Mean Peak Iron
+p2_5 <- subscale_summary %>% ungroup () %>%  
+  ggplot(aes(x = mean_peak_Iron, y = oROI, fill = oROI)) +  
+  geom_point(shape = 21, size = 5.5, color = "white") +
+          scale_x_continuous(trans = "reverse", limits = c(.015, .009), breaks = c(.015, .0125, .010))+ 
+  scale_fill_manual(values = iron_colorbar2) +
+  labs(x = "\nPeak nT2*w",
+       y = "ROI\n") +
+  scale_y_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p2_5)
+
+
+#Mean Age of Peak Iron
+p3_5 <- subscale_summary %>% ungroup () %>%  
+  ggplot(aes(x = mean_peak_age_Iron, y = oROI, fill = oROI)) +  
+  geom_point(shape = 21, size = 5.5, color = "white") +
+          scale_x_continuous(limits = c(18, 22), breaks = seq(18, 22, by = 2))+
+  scale_fill_manual(values = iron_colorbar2) +
+  labs(x = "\nAge of Peak nT2*w",
+       y = "ROI\n") +
+  scale_y_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p3_5)
+
+
+Iron_Summ <- ggarrange(p1_5, p2_5, p3_5, 
+                    ncol = 3, nrow = 1)
+Iron_Summ
+
+ggsave(Iron_Summ, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_MeanPeakPAge_AllROIs.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+
+#Mean & SE Iron
+p1_5_SE <- ggplot(subscale_summary, aes(mean_Iron, oROI)) +
+  geom_pointrange(
+    aes(xmin = mean_Iron-sd_Iron, xmax = mean_Iron+sd_Iron, color = oROI), position = position_dodge(0.3))+ 
+  scale_x_continuous(trans = "reverse", limits = c(.015, .010), breaks = c(.015, .0125, .010))+ 
+  scale_color_manual(values = iron_colorbar2) +
+  scale_fill_manual(values = iron_colorbar2) +
+  labs(x = "\nnT2*w",
+       y = "ROI\n") +
+  scale_y_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p1_5_SE)
+ 
+  
+#Mean & SE Peak Iron
+p2_5_SE <- ggplot(subscale_summary, aes(mean_peak_Iron, oROI)) +
+  geom_pointrange(
+    aes(xmin = mean_peak_Iron-sd_peak_Iron, xmax = mean_peak_Iron+sd_peak_Iron, color = oROI), position = position_dodge(0.3))+ 
+scale_x_continuous(trans = "reverse", limits = c(.015, .009), breaks = c(.015, .0125, .010))+
+  scale_color_manual(values = iron_colorbar2) +
+  scale_fill_manual(values = iron_colorbar2) +
+ labs(x = "\nPeak nT2*w",
+       y = "ROI\n") +
+  scale_y_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p2_5_SE)
+
+
+#Mean & SE Age of Peak Iron
+p3_5_SE <- ggplot(subscale_summary, aes(mean_peak_age_Iron, oROI)) +
+  geom_pointrange(
+    aes(xmin = mean_peak_age_Iron-SD_peak_age_Iron, xmax = mean_peak_age_Iron+SD_peak_age_Iron, color = oROI), position = position_dodge(0.3))+ 
+            scale_x_continuous(limits = c(18, 22), breaks = seq(18, 22, by = 2))+ 
+  scale_fill_manual(values = iron_colorbar2) +
+  scale_color_manual(values = iron_colorbar2) +
+  labs(x = "\nAge of Peak nT2*w",
+       y = "ROI\n") +
+  scale_y_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p3_5_SE)
+
+
+Iron_Summ_SE <- ggarrange(p1_5_SE, p2_5_SE, p3_5_SE, 
+                    ncol = 3, nrow = 1)
+Iron_Summ_SE
+
+ggsave(Iron_Summ_SE, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_MeanPeakPAge_SE_AllROIs.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+``` 
+
+## Demographic Factors
+```{r, echo = FALSE, fig.align='center'}
+
+# Initialize empty results data frame
+Iron_Results.sex <- data.frame(
+  oROI = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(Iron$oROI)) {
+  
+  # Subset data for the current substance
+  sub_df <- Iron %>% filter(oROI == s)
+  # Try fitting the model
+  model <- mgcv::gamm(
+      tat2.combat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + sex,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    Iron_Results.sex <- rbind(Iron_Results.sex, data.frame(
+      oROI = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+Iron_Results.sex$Label <- "Sex"
+
+
+# Initialize empty results data frame
+Iron_Results.income <- data.frame(
+  oROI = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(Iron$oROI)) {
+  
+  # Subset data for the current substance
+  sub_df <- Iron %>% filter(oROI == s)
+  # Try fitting the model
+  model <- mgcv::gamm(
+      tat2.combat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + oIncome_recode,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    Iron_Results.income <- rbind(Iron_Results.income, data.frame(
+      oROI = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+Iron_Results.income$Label <- "Income"
+
+
+# Initialize empty results data frame
+Iron_Results.raceeth <- data.frame(
+  oROI = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(Iron$oROI)) {
+  
+  # Subset data for the current substance
+  sub_df <- Iron %>% filter(oROI == s)
+  # Try fitting the model
+  model <- mgcv::gamm(
+      tat2.combat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + oRaceeth_recode,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    Iron_Results.raceeth <- rbind(Iron_Results.raceeth, data.frame(
+      oROI = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+Iron_Results.raceeth$Label <- "Race/Eth"
+
+
+
+# Initialize empty results data frame
+Iron_Results.site <- data.frame(
+  oROI = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(Iron$oROI)) {
+  
+  # Subset data for the current substance
+  sub_df <- Iron %>% filter(oROI == s)
+  # Try fitting the model
+  model <- mgcv::gamm(
+      tat2.combat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + site,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    Iron_Results.site <- rbind(Iron_Results.site, data.frame(
+      oROI = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+Iron_Results.site$Label <- "Site"
+
+#Peak Substance Use 
+
+unique_peak_df <- dplyr::select(All_Sites_Iron, subject, sex, oIncome_recode, oRaceeth_recode, site, peak_Iron, peak_age_Iron,oROI) %>% filter(!is.na(oROI))
+unique_peak_df <- unique(unique_peak_df)
+
+
+# Across Substances 
+gam.model_peakIron <- mgcv::gam(
+  peak_Iron ~ oROI + sex + oIncome_recode + oRaceeth_recode + site,
+  data = unique_peak_df %>% 
+    filter(oROI != "BG"),
+  method = "REML")
+summary(gam.model_peakIron)
+anova(gam.model_peakIron)  
+ 
+library(mgcv)
+library(dplyr)
+
+# Initialize empty results data frame
+Iron_Peak_Results.sex <- data.frame(
+  oROI = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(unique_peak_df$oROI)) {
+  
+  # Subset data for the current substance
+  sub_df <- unique_peak_df %>% filter(oROI == s)
+  # Try fitting the model
+  model <- mgcv::gam(
+      peak_Iron ~ sex,
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    Iron_Peak_Results.sex <- rbind(Iron_Peak_Results.sex, data.frame(
+      oROI = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+Iron_Peak_Results.sex$Label <- "Sex"
+
+
+
+# Initialize empty results data frame
+Iron_Peak_Results.income <- data.frame(
+  oROI = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(unique_peak_df$oROI)) {
+  
+  # Subset data for the current substance
+  sub_df <- unique_peak_df %>% filter(oROI == s)
+  # Try fitting the model
+  model <- mgcv::gam(
+      peak_Iron ~ oIncome_recode,
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    Iron_Peak_Results.income <- rbind(Iron_Peak_Results.income, data.frame(
+      oROI = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+Iron_Peak_Results.income$Label <- "Income"
+
+
+# Initialize empty results data frame
+Iron_Peak_Results.raceeth <- data.frame(
+  oROI = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(unique_peak_df$oROI)) {
+  
+  # Subset data for the current substance
+  sub_df <- unique_peak_df %>% filter(oROI == s)
+  # Try fitting the model
+  model <- mgcv::gam(
+      peak_Iron ~ oRaceeth_recode,
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    Iron_Peak_Results.raceeth <- rbind(Iron_Peak_Results.raceeth, data.frame(
+      oROI = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+Iron_Peak_Results.raceeth$Label <- "Race/Eth"
+
+
+# Initialize empty results data frame
+Iron_Peak_Results.site <- data.frame(
+  oROI = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(unique_peak_df$oROI)) {
+  
+  # Subset data for the current substance
+  sub_df <- unique_peak_df %>% filter(oROI == s)
+  # Try fitting the model
+  model <- mgcv::gam(
+      peak_Iron ~ site,
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    Iron_Peak_Results.site <- rbind(Iron_Peak_Results.site, data.frame(
+      oROI = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+Iron_Peak_Results.site$Label <- "Site"
+
+
+#Combine models for data tables 
+Main_Eff_Demo_Mean <- rbind(Iron_Results.sex, Iron_Results.income, Iron_Results.raceeth, Iron_Results.site)
+
+custom_order <- c("BG", "Caudate", "NAcc", "Pallidum", "Putamen")
+
+# Convert to factor with levels in custom order
+Main_Eff_Demo_Mean <- Main_Eff_Demo_Mean %>%
+  mutate(oROI = factor(oROI, levels = custom_order)) %>%
+  arrange(oROI)
+
+#Combine models for data tables 
+Main_Eff_Demo_Peak <- rbind(Iron_Peak_Results.sex, Iron_Peak_Results.income, Iron_Peak_Results.raceeth, Iron_Peak_Results.site)
+
+Main_Eff_Demo_Peak <- Main_Eff_Demo_Peak %>%
+  mutate(oROI = factor(oROI, levels = custom_order)) %>%
+  arrange(oROI)
+
+Main_Eff_Demo_Mean[] <- lapply(Main_Eff_Demo_Mean, function(x) if (is.numeric(x)) round(x, 2) else x)
+Main_Eff_Demo_Peak[] <- lapply(Main_Eff_Demo_Peak, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+write.csv(Main_Eff_Demo_Mean, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Main_Effects_SociodemographicFacs_Across_IronROIs.csv', row.names = FALSE)
+
+write.csv(Main_Eff_Demo_Peak, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Peak_Main_Effects_SociodemographicFacs_Across_IronROIs.csv', row.names = FALSE)
+
+
+``` 
+
+### Plots: 
+```{r, echo = FALSE, fig.align='center'}
+
+#Order the demographic factors accordingly 
+Long_means_all_SES$oLabel<-ordered(Long_means_all_SES$Label,
+levels=c("E", "D", "C","B", "A", "Other","Non-Hispanic Black/AA", "Non-Hispanic White", "Hispanic", 
+         "Asian AIAN NHPI OTHER", "200k+","100k-199k","75k-99k","50k-74k", "25k-49k","<25k", 
+         "M","F","All"))
+
+#Mean Iron across sociodemographic factors 
+p1_5_SES <- Long_means_all_SES %>% ungroup () %>% 
+  ggplot(aes(x = mean_Iron, y = oLabel, fill = oLabel)) + facet_wrap(~oROI, scales = "free")+
+    scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  geom_point(shape = 21, size = 2.5, color = "white") +
+labs(x = "\nnT2*w",
+       y = "Subgroup\n") +
+        # scale_x_continuous(trans = "reverse", limits = c(.015, .010), breaks = c(.015, .0125,.010))+ #Formatting best for consistency across all ROIs
+scale_x_continuous(trans = "reverse", limits = c(.0139, .0133), breaks = c(.0138, .0136,.0134))+#Formatting best for basal ganglia iron (main)
+    theme(aspect.ratio = 1.5,                       
+        strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p1_5_SES)
+ 
+
+#Mean Peak Iron across sociodemographic factors 
+p2_5_SES <- Long_means_all_SES %>% ungroup () %>% 
+  ggplot(aes(x = mean_peak_Iron, y = oLabel, fill = oLabel)) + facet_wrap(~oROI, scales = "free")+
+      scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  geom_point(shape = 21, size = 2.5, color = "white") +
+labs(x = "\nPeak nT2*w",
+       y = "Subgroup\n") +
+    # scale_x_continuous(trans = "reverse", limits = c(.015, .008), breaks = c(.014,.012, .010,.008))+ #Formatting best for consistency across all ROIs
+scale_x_continuous(trans = "reverse", limits = c(.0133, .0129), breaks = c(.0133, .0131, .0129))+#Formatting best for basal ganglia iron (main)
+  theme(aspect.ratio = 1.5,
+ strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p2_5_SES)
+ 
+#Mean Age of Peak Iron across sociodemographic factors 
+p3_5_SES <- Long_means_all_SES %>% ungroup () %>% 
+  ggplot(aes(x = mean_peak_age_Iron, y = oLabel, fill = oLabel)) + facet_wrap(~oROI, scales = "free")+
+  geom_point(shape = 21, size = 2.5, color = "white") +
+      scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+theme_classic() +
+  labs(x = "\nAge of Peak nT2*w",
+       y = "Subgroup\n") +
+          scale_x_continuous(limits = c(18.75, 22), breaks = seq(19, 22, by = 1))+ #Formatting best for general substance use (all)
+        # scale_x_continuous(limits = c(18.75, 22), breaks = seq(19, 22, by = 1))+ #Formatting best for consistency across all substances
+theme(aspect.ratio = 1.5,
+  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p3_5_SES)
+ 
+
+ggsave(p1_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Mean_AllROIs_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+ggsave(p2_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Peak_AllROIs_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+ 
+ggsave(p3_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Peak_Age_AllROIs_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+  
+``` 
+
+# Characterize Age Changes
+## Full Sample   
+
+```{r, echo = FALSE, fig.align='center'}
+
+ 
+rois <- levels(Iron$roi)
+
+gam.statistics <- data.frame(
+  roi = factor(rep(NA, length(rois)), levels = rois),
+  GAM.smooth_Fvalue = numeric(length(rois)),
+  GAM.smooth.pvalue = numeric(length(rois)),
+  smooth.change.onset = numeric(length(rois)),
+  smooth.peak.change = numeric(length(rois)),
+  smooth.decrease.onset = numeric(length(rois)),
+  smooth.decrease.offset = numeric(length(rois)),
+  smooth.increase.onset = numeric(length(rois)),
+  smooth.increase.offset = numeric(length(rois)),
+  smooth.last.change = numeric(length(rois)), 
+  max.age.fitted = numeric(length(rois))
+  )
+
+#Substance = roi
+gam.fittedvalues <- data.frame(roi = factor(), visit_age = numeric(), fitted = numeric(), fitted2 = numeric(), se = numeric(), lower_ci = numeric(), upper_ci=numeric())
+
+gam.smoothestimates <- data.frame(roi = factor(), visit_age = numeric(), estimate = numeric(), se = numeric())
+
+gam.derivatives <- data.frame(roi = factor(), visit_age = numeric(), derivative = numeric(), lower = numeric(),
+                              upper = numeric(), significant = numeric(), significant_deriv = numeric()) 
+
+gam.pred <- data.frame(roi = factor(), visit_age = numeric(), predicted = numeric(), se = numeric(),
+                              lower = numeric(), upper = numeric()) 
+
+#subst = roist
+for (roist in seq_along(rois)) {
+  sub_df <- Iron[Iron$roi == rois[roist], ]  # Subset data
+  
+gam.model <- mgcv::gamm(tat2.combat ~ s(visit_age, fx = F, k = 4, bs = "cs") + 
+                              sex + oIncome_recode + oRaceeth_recode + site, 
+             random = list(subject = ~1, subject = ~0 + visit_age),
+             data=sub_df,# %>%
+             method = "REML")
+
+gam.results <- summary(gam.model$gam)
+
+df <- as.data.frame(unclass(gam.model$gam$model),stringsAsFactors = TRUE)
+np <- 200
+thisPred <- data.frame(init = rep(0,np))
+theseVars <- attr(gam.model$gam$terms, "term.labels")
+varClasses <- attr(gam.model$gam$terms,"dataClasses")
+thisResp <- as.character(gam.model$gam$terms[[2]])
+smooth_var <- "visit_age"
+for (v in c(1:length(theseVars))) {
+  thisVar <- theseVars[[v]]
+  thisClass <- varClasses[thisVar]
+  if (thisVar == smooth_var) {
+    thisPred[,smooth_var] = seq(min(df[,smooth_var],na.rm=T), max(df[,smooth_var], na.rm=T), length.out = np)
+  } else {
+      switch (thisClass,
+              "numeric" = {thisPred[,thisVar] = median(df[,thisVar])}, #make predictions based on median value
+              "character" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]}, #make predictions based on first level of char
+              "factor" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]}, #make predictions based on first level of factor 
+              "ordered" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]} #make predictions based on first level of ordinal variable
+      )
+    }
+  }
+  pred <- thisPred %>% dplyr::select(-init)
+  
+## MODEL STATSTICS ##  
+#GAM derivatives
+#Get derivatives of the smooth function using finite differences
+derv <- gratia::derivatives(gam.model, term = sprintf('s(%s)',smooth_var), data = pred, interval = "simultaneous", unconditional = F) #derivative at 200 indices of smooth_var with a simultaneous CI
+  #Identify derivative significance window(s)
+  derv <- derv %>% #add "sig" column (TRUE/FALSE) to derv
+    mutate(sig = !(0 > .lower_ci & 0 < .upper_ci)) #derivative is sig if the lower CI is not < 0 while the upper CI is > 0 (i.e., when the CI does not include 0)
+  derv$sig_deriv = derv$.derivative*derv$sig #add "sig_deriv derivatives column where non-significant derivatives are set to 0
+  mean.derivative <- mean(derv$.derivative)
+  
+  #Model summary outputs
+  #Signed F value for the smooth term and GAM-based significance of the smooth term
+  gam.smooth.F <- gam.results$s.table[1,3] #first row is s(smooth_var), third entry is F
+  gam.smooth.Rsq <- gam.results$r.sq
+  if(mean.derivative < 0){ #if the average derivative is less than 0, make the effect size estimate negative
+    gam.smooth.F <- gam.smooth.F*-1}
+  
+  gam.smooth.pvalue <- gam.results$s.table[1,4] #first row is s(smooth_var), fourth entry is p-value
+
+ #Derivative-based temporal characteristics
+  #Age of developmental change onset
+  if(sum(derv$sig) > 0){ #if derivative is significant at at least 1 age
+    change.onset <- min(derv$visit_age[derv$sig==T])} #find first age in the smooth where derivative is significant
+  if(sum(derv$sig) == 0){ #if gam derivative is never significant
+    change.onset <- NA} #assign NA
+ 
+  #Age of maximal developmental change
+  if(sum(derv$sig) > 0){ 
+    derv$abs_sig_deriv = round(abs(derv$sig_deriv),5) #absolute value significant derivatives
+    maxval <- max(derv$abs_sig_deriv) #find the largest derivative
+    window.peak.change <- derv$visit_age[derv$abs_sig_deriv == maxval] #identify the age(s) at which the derivative is greatest in absolute magnitude
+    peak.change <- mean(window.peak.change)} #identify the age of peak developmental change
+  if(sum(derv$sig) == 0){ 
+    peak.change <- NA}  
+ 
+  #Age of decrease onset
+  if(sum(derv$sig) > 0){ 
+    decreasing.range <- derv$visit_age[derv$sig_deriv < 0] #identify all ages with a significant negative derivative (i.e., smooth_var indices where y is decreasing)
+    if(length(decreasing.range) > 0)
+      decrease.onset <- min(decreasing.range) #find youngest age with a significant negative derivative
+    if(length(decreasing.range) == 0)
+      decrease.onset <- NA}
+  if(sum(derv$sig) == 0){
+    decrease.onset <- NA}  
+
+    #Age of decrease offset
+  if(sum(derv$sig) > 0){ 
+    decreasing.range <- derv$visit_age[derv$sig_deriv < 0] #identify all ages with a significant negative derivative (i.e., smooth_var indices where y is decreasing)
+    if(length(decreasing.range) > 0){
+      last.decrease <- max(decreasing.range) #find oldest age with a significant negative derivative
+      if(last.decrease == derv$visit_age[length(derv$visit_age)]) #if the last age of significant decrease is the oldest in the dataset
+        decrease.offset <- last.decrease
+      if(last.decrease != derv$visit_age[length(derv$visit_age)]){ 
+        decrease.offset.row <- which(derv$visit_age == last.decrease) + 1 #use above to find the first age when the derivative is not significant
+        decrease.offset <- derv$visit_age[decrease.offset.row]}
+    }
+    if(length(decreasing.range) == 0)
+      decrease.offset <- NA}
+  if(sum(derv$sig) == 0){ 
+    decrease.offset <- NA}  
+
+  #Age of increase onset
+  if(sum(derv$sig) > 0){ 
+    increasing.range <- derv$visit_age[derv$sig_deriv > 0] #identify all ages with a significant positive derivative (i.e., smooth_var indices where y is increasing)
+    if(length(increasing.range) > 0)
+      increase.onset <- min(increasing.range) #find oldest age with a significant positive derivative
+    if(length(increasing.range) == 0)
+      increase.onset <- NA}
+  if(sum(derv$sig) == 0){ 
+    increase.onset <- NA}  
+ 
+#Age of increase offset
+  if(sum(derv$sig) > 0){ 
+    increasing.range <- derv$visit_age[derv$sig_deriv > 0] #identify all ages with a significant positive derivative (i.e., smooth_var indices where y is increasing)
+    if(length(increasing.range) > 0){
+      last.increase <- max(increasing.range) #find oldest age with a significant positive derivative
+      if(last.increase == derv$visit_age[length(derv$visit_age)]) #if the last age of significant increase is the oldest in the dataset
+        increase.offset <- last.increase
+      if(last.increase != derv$visit_age[length(derv$visit_age)]){ 
+        increase.offset.row <- which(derv$visit_age == last.increase) + 1 #use above to find the first age when the derivative is not significant
+        increase.offset <- derv$visit_age[increase.offset.row]}
+    }
+    if(length(increasing.range) == 0)
+      increase.offset <- NA}
+  if(sum(derv$sig) == 0){ 
+    increase.offset <- NA}  
+  
+ #Age of last change
+  if(sum(derv$sig) > 0){ 
+    change.offset <- max(derv$visit_age[derv$sig==T])} #find last age in the smooth where derivative is significant
+  if(sum(derv$sig) == 0){ 
+    change.offset <- NA}  
+  
+gam.statistics$roi[roist] <- rois[roist]
+gam.statistics$GAM.smooth_Fvalue[roist] <- gam.smooth.F
+gam.statistics$GAM.smooth_RSq[roist] <- gam.smooth.Rsq
+gam.statistics$GAM.smooth.pvalue[roist] <- gam.smooth.pvalue
+gam.statistics$smooth.change.onset[roist] <- change.onset
+gam.statistics$smooth.peak.change[roist] <- peak.change
+gam.statistics$smooth.decrease.onset[roist] <- decrease.onset
+gam.statistics$smooth.decrease.offset[roist] <- decrease.offset
+gam.statistics$smooth.increase.onset[roist] <- increase.onset
+gam.statistics$smooth.increase.offset[roist] <- increase.offset
+gam.statistics$smooth.last.change[roist] <- change.offset
+
+ #Generate predictions (fitted values) based on the gam model and predication data frame
+gam.fittedvalues_temp <- gratia::fitted_values(object = gam.model, data = pred)
+gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+  
+maxval2 <- min(gam.fittedvalues_temp$.fitted) #find the largest derivative
+gam.statistics$max.age.fitted[roist] <- gam.fittedvalues_temp$visit_age[gam.fittedvalues_temp$.fitted == maxval2] #identify the age(s) at which the 
+gam.statistics$max.val.fitted[roist] <- maxval2
+
+# gam.fittedvalues_temp <- plogis(fitted(gam.model$gam))*30
+
+temp_fit <- data.frame(
+  roi = factor(rois[roist]),
+  visit_age = gam.fittedvalues_temp$visit_age, 
+  fitted = gam.fittedvalues_temp$.fitted, 
+  fitted2 = gam.fittedvalues_temp$.fitted2, 
+  se = gam.fittedvalues_temp$.se, 
+  lower_ci = gam.fittedvalues_temp$.lower_ci, 
+  upper_ci = gam.fittedvalues_temp$.upper_ci)
+gam.fittedvalues <- bind_rows(gam.fittedvalues, temp_fit)
+
+gam.smoothvalues_temp <- gratia::smooth_estimates(object = gam.model, data = pred, smooth = sprintf('s(%s)',smooth_var))
+
+temp_smooth <- data.frame(
+  roi = factor(rois[roist]),
+  visit_age = gam.smoothvalues_temp$visit_age, 
+  estimate = gam.smoothvalues_temp$.estimate,  
+  se = gam.smoothvalues_temp$.se)
+gam.smoothestimates <- bind_rows(gam.smoothestimates, temp_smooth)
+
+temp_deriv <- data.frame(
+  roi = factor(rois[roist]),
+  visit_age = derv$visit_age, 
+  derivative = derv$.derivative, 
+  lower = derv$.lower_ci,
+  upper = derv$.upper_ci, 
+  significant = derv$sig, 
+  significant_deriv = derv$sig_deriv)
+
+gam.derivatives <- bind_rows(gam.derivatives, temp_deriv)
+
+gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+
+temp_pred <- data.frame(
+  roi = factor(rois[roist]),
+  visit_age = gam.pred_temp$x,
+  predicted = gam.pred_temp$predicted, 
+  se = gam.pred_temp$std.error,
+  lower = gam.pred_temp$conf.low, 
+  upper = gam.pred_temp$conf.high)
+
+gam.pred <- bind_rows(gam.pred, temp_pred)  
+
+}
+
+
+#Calculate the average first derivative in each region at each substance
+deriv_rate <- gam.derivatives %>% group_by(roi) %>% do(deriv_rate = mean(.$derivative)) %>% unnest(cols = "deriv_rate")
+
+gam.statistics <- merge(gam.statistics, deriv_rate, by = "roi")
+
+
+
+# gam.statistics[] <- lapply(gam.statistics, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+custom_order <- c("BG", "Caudate", "NAcc", "Pallidum", "Putamen")
+# Convert to factor with levels in custom order
+gam.statistics <- gam.statistics %>%
+  mutate(roi = factor(roi, levels = custom_order)) %>%
+  arrange(roi)
+
+write.csv(gam.statistics, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Smooth_Statistics_Across_IronROIs_FullSample.csv', row.names = FALSE)
+
+
+``` 
+
+### Plots:  
+```{r, echo = FALSE, fig.align='center'}
+
+# Age by Iron: All Subscsales, no datapoints
+age1 <- ggplot(All_Sites_Iron,
+                    aes(x=visit_age, y=tat2.combat, color=oROI,fill=oROI))+
+  geom_smooth(method="gam", formula = y ~ s(x, k = 4, fx = FALSE, bs = "cs"))+
+   scale_color_manual(values=iron_colorbar)+
+   scale_fill_manual(values=iron_colorbar)+
+   theme(aspect.ratio=.5, legend.position = "none",
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+
+  scale_y_continuous(trans = "reverse")+
+   labs(x = "\nAge",
+       y = "nT2*w\n")
+print(age1)
+
+# Age by Iron: ROIs separately, trajectories shown 
+age2 <- ggplot(All_Sites_Iron,
+                    aes(x=visit_age, y=tat2.combat, color=oROI,fill=oROI))+ 
+  geom_line(data= All_Sites_Iron,
+            aes(y=tat2.combat, x = visit_age, group=subject), alpha=.1, color = "black",
+            linewidth = .25)+ facet_wrap(~oROI, scales = "free")+
+  scale_fill_manual(values = iron_colorbar)+ 
+  scale_color_manual(values = iron_colorbar)+ 
+  geom_smooth(method="gam", formula = y ~ s(x, k = 4, fx = FALSE,bs = "cs"))+
+  theme(legend.position = "none", aspect.ratio=.5, 
+                               strip.background = element_blank(),
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+
+  scale_y_continuous(trans = "reverse")+
+  scale_y_continuous(trans = "reverse",limits = c(.016, .011))+ #Formatting best for basal ganglia (main)
+    # scale_y_continuous(trans = "reverse",limits = c(.02, .003))+#Formatting best for consistency across ROIs
+    labs(x = "\nAge",
+       y = "nT2*w\n")
+print(age2)
+ 
+# Derivative plots for Iron: ROIs separately 
+
+derv<- gam.derivatives[gam.derivatives$roi=="BG",] 
+d1<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = iron_colorbar[1], midpoint = 0, mid = "white",
+                           high = iron_colorbar[1])+#, limits = c(min_val, 0))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) + geom_vline(data = gam.statistics[gam.statistics$roi=="BG",], aes(xintercept=smooth.decrease.offset), color="black") +
+      geom_vline(data = gam.statistics[gam.statistics$roi=="BG",], aes(xintercept=smooth.decrease.onset), color="black") +
+scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+
+  xlab("\nAge") + ylab("Basal Ganglia nT2*w\n")
+ 
+derv<- gam.derivatives[gam.derivatives$roi=="NAcc",] 
+d2<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = iron_colorbar[2], midpoint = 0, mid = "white",
+                           high = iron_colorbar[2])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) + 
+  geom_vline(data = gam.statistics[gam.statistics$roi=="NAcc",], aes(xintercept=smooth.decrease.offset), color="black") +
+      geom_vline(data = gam.statistics[gam.statistics$roi=="NAcc",], aes(xintercept=smooth.decrease.onset), color="black") +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+  xlab("\nAge") + ylab("NAcc nT2*w\n")
+
+derv<- gam.derivatives[gam.derivatives$roi=="Putamen",] 
+d3<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = iron_colorbar[3], midpoint = 0, mid = "white",
+                           high = iron_colorbar[3])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) +   geom_vline(data = gam.statistics[gam.statistics$roi=="Putamen",], aes(xintercept=smooth.decrease.offset), color="black") +
+      geom_vline(data = gam.statistics[gam.statistics$roi=="Putamen",], aes(xintercept=smooth.decrease.onset), color="black") +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+  xlab("\nAge") + ylab("Putamen nT2*w\n")
+
+
+derv<- gam.derivatives[gam.derivatives$roi=="Caudate",] 
+d4<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = iron_colorbar[4], midpoint = 0, mid = "white",
+                           high = iron_colorbar[4])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) +   geom_vline(data = gam.statistics[gam.statistics$roi=="Caudate",], aes(xintercept=smooth.decrease.offset), color="black") +
+      geom_vline(data = gam.statistics[gam.statistics$roi=="Caudate",], aes(xintercept=smooth.decrease.onset), color="black") +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+  xlab("\nAge") + ylab("Caudate nT2*w\n")
+ 
+derv<- gam.derivatives[gam.derivatives$roi=="Pallidum",] 
+d5<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = iron_colorbar[5], midpoint = 0, mid = "white",
+                           high = iron_colorbar[5])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) +   geom_vline(data = gam.statistics[gam.statistics$roi=="Pallidum",], aes(xintercept=smooth.decrease.offset), color="black") +
+      geom_vline(data = gam.statistics[gam.statistics$roi=="Pallidum",], aes(xintercept=smooth.decrease.onset), color="black") +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+  xlab("\nAge") + ylab("Pallidum nT2*w\n")
+
+
+
+
+Derv1 <- ggarrange(d1, d2, d3, 
+                   ncol = 3, nrow = 1)
+  
+Derv2 <- ggarrange(d4, d5, 
+                   ncol = 3, nrow = 1)
+ 
+
+ggsave(age1, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_AllROIs.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+ggsave(age2, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_AllROIs_Sep.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+ggsave(Derv1, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_Deriv1_AllROIs_Sep.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+
+ggsave(Derv2, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_Deriv2_AllROIs_Sep.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+
+
+gam.statistics$oROI <- ordered(gam.statistics$roi, levels = c( "BG","NAcc", "Pallidum","Putamen", 
+                                                                          "Caudate"))
+
+# Age of Peak Iron Identified by smooth fits in GAM models
+
+age1_5 <- gam.statistics %>% ungroup () %>%  
+  ggplot(aes(x = max.age.fitted, y = oROI, fill = oROI)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = iron_colorbar2) +
+labs(x = "\nAge of Peak nT2*w (smooth)",
+       y = "ROI\n") +
+  scale_y_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+            scale_x_continuous(limits = c(29, 29.5), breaks = seq(29, 29.5, by = .25))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age1_5)
+
+age2_5 <- gam.statistics %>% ungroup () %>% 
+  ggplot(aes(x = deriv_rate, y = oROI, fill = oROI)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = iron_colorbar2) +
+labs(x = "\nRate of Increase",
+       y = "ROI\n") +
+  scale_y_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+    scale_x_continuous(trans = "reverse")+
+      # scale_x_continuous(limits = c(0, .25))+
+  # scale_x_continuous(breaks = c(0.0010, 0.0014, 0.0018), limits = c(0.00085, 0.0019)) +
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age2_5)
+
+
+
+age3_5 <- gam.statistics %>% ungroup () %>% 
+  ggplot(aes(x = smooth.last.change, y = oROI, fill = oROI)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = iron_colorbar2) +
+labs(x = "\nAge of Maturation",
+       y = "ROI\n") +
+  scale_y_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+            scale_x_continuous(limits = c(29, 29.5), breaks = seq(29, 29.5, by = .25))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age3_5)
+
+
+age4_5 <- gam.statistics %>% ungroup () %>% 
+  ggplot(aes(x = smooth.peak.change, y = oROI, fill = oROI)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = iron_colorbar2) +
+ labs(x = "\nAge of Peak Change",
+       y = "ROI\n") +
+  scale_y_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age4_5)
+
+
+
+age5_5 <- gam.statistics %>% ungroup () %>% 
+  ggplot(aes(x = smooth.decrease.onset, y = oROI, fill = oROI)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+
+  scale_fill_manual(values = iron_colorbar2) +
+  labs(x = "\nIncrease Onset (Age)",
+       y = "ROI\n") +
+  scale_y_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+            scale_x_continuous(limits = c(12, 15), breaks = seq(12, 15, by = 1))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age5_5)
+
+
+
+age6_5 <- gam.statistics %>% ungroup () %>%  
+  ggplot(aes(x = smooth.decrease.offset, y = oROI, fill = oROI)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = iron_colorbar2) +
+  labs(x = "\nIncrease Offset (Age)",
+       y = "ROI\n") +
+  scale_y_discrete(
+    breaks = c("BG", "NAcc", "Pallidum", "Putamen", "Caudate"),
+    labels = c("BG", "NAcc", "GP","Put.","Caud."))+
+            scale_x_continuous(limits = c(29, 29.5), breaks = seq(29, 29.5, by = .25))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age6_5)
+
+
+Iron_Plots_Age1 <- ggarrange(age1_5, age2_5, age3_5,
+                    ncol = 3, nrow = 1)
+Iron_Plots_Age1
+ 
+
+Iron_Plots_Age2 <- ggarrange(age4_5, age5_5, age6_5,
+                    ncol = 3, nrow = 1)
+Iron_Plots_Age2 
+
+ggsave(Iron_Plots_Age1, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_AllROIs_Gam_Stats1.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(Iron_Plots_Age2, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_AllROIs_Gam_Stats2.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+
+``` 
+## Demographic Factors   
+
+### All Participants (no covariates)
+```{r, echo = FALSE, fig.align='center'}
+
+set.seed(1)
+
+
+roi <- levels(Iron$oROI)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over ROI & sexes
+# ----------------------------
+for (subst in roi) {
+    
+    sub_df <- Iron %>%
+      filter(oROI == subst)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      tat2.combat ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.min(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      oROI = subst,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      oROI = subst, 
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      oROI = subst, 
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      oROI = subst,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      oROI = subst, 
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(oROI) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_all <- left_join(gam.statistics, deriv_rate, by = c("oROI"))
+gam.statistics_all$Label <- "All"
+gam.fittedvalues_all <- gam.fittedvalues
+gam.fittedvalues_all$Label <- "All"
+gam.pred_all <- gam.pred
+gam.pred_all$Label <- "All"
+gam.derivatives_all <- gam.derivatives
+gam.derivatives_all$Label <- "All"
+
+``` 
+
+###Sex 
+```{r, echo = FALSE, fig.align='center'}
+
+roi <- levels(Iron$oROI)
+sexes <- levels(Iron$sex)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over ROI & sexes
+# ----------------------------
+for (subst in roi) {
+  for (sx in sexes) {
+    
+    sub_df <- Iron %>%
+      filter(oROI == subst, sex == sx)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      tat2.combat ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.min(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      oROI = subst,
+      Label = sx,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+}
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(oROI, Label) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_sex <- left_join(gam.statistics, deriv_rate, by = c("oROI","Label"))
+gam.fittedvalues_sex <- gam.fittedvalues
+gam.pred_sex <- gam.pred
+gam.derivatives_sex <- gam.derivatives
+
+``` 
+
+###Income 
+```{r, echo = FALSE, fig.align='center'}
+
+roi <- levels(Iron$oROI)
+incomes <- levels(Iron$oIncome_recode)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over ROI & incomes
+# ----------------------------
+for (subst in roi) {
+  for (sx in incomes) {
+    
+    sub_df <- Iron %>%
+      filter(oROI == subst, oIncome_recode == sx)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      tat2.combat ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.min(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      oROI = subst,
+      Label = sx,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+}
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(oROI, Label) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_income <- left_join(gam.statistics, deriv_rate, by = c("oROI","Label"))
+gam.fittedvalues_income <- gam.fittedvalues
+gam.pred_income <- gam.pred
+gam.derivatives_income <- gam.derivatives
+
+``` 
+
+###Race 
+```{r, echo = FALSE, fig.align='center'}
+
+roi <- levels(Iron$oROI)
+races <- levels(Iron$oRaceeth_recode)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over ROI & incomes
+# ----------------------------
+for (subst in roi) {
+  for (sx in races) {
+    
+    sub_df <- Iron %>%
+      filter(oROI == subst, oRaceeth_recode == sx)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      tat2.combat ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.min(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      oROI = subst,
+      Label = sx,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+}
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(oROI, Label) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_raceeth <- left_join(gam.statistics, deriv_rate, by = c("oROI","Label"))
+gam.fittedvalues_raceeth <- gam.fittedvalues
+gam.pred_raceeth <- gam.pred
+gam.derivatives_raceeth <- gam.derivatives
+
+``` 
+
+
+### Site
+```{r, echo = FALSE, fig.align='center'}
+
+roi <- levels(Iron$oROI)
+sites <- levels(Iron$site)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  oROI = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over ROI & incomes
+# ----------------------------
+for (subst in roi) {
+  for (sx in sites) {
+    
+    sub_df <- Iron %>%
+      filter(oROI == subst, site == sx)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      tat2.combat ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.min(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      oROI = subst,
+      Label = sx,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      oROI = subst, Label = sx,
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+}
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(oROI, Label) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_site <- left_join(gam.statistics, deriv_rate, by = c("oROI","Label"))
+gam.fittedvalues_site <- gam.fittedvalues
+gam.pred_site <- gam.pred
+gam.derivatives_site <- gam.derivatives
+
+``` 
+
+#### Combine the pred 
+```{r, echo = FALSE, fig.align='center'}
+ 
+All_Tat2_Fitted <- rbind(gam.fittedvalues_sex, gam.fittedvalues_income, gam.fittedvalues_raceeth, gam.fittedvalues_site, gam.fittedvalues_all)
+
+All_Tat2_Pred <- rbind(gam.pred_sex, gam.pred_income, gam.pred_raceeth, gam.pred_site, gam.pred_all)
+
+All_Tat2_Stats <- rbind(gam.statistics_sex, gam.statistics_income, gam.statistics_raceeth, gam.statistics_site, gam.statistics_all)
+
+
+
+# All_Tat2_SES_Statistics[] <- lapply(All_Tat2_SES_Statistics, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+custom_order <- c("BG", "Caudate", "NAcc", "Pallidum", "Putamen")
+# Convert to factor with levels in custom order
+All_Tat2_Stats <- All_Tat2_Stats %>%
+  mutate(oROI = factor(oROI, levels = custom_order)) %>%
+  arrange(oROI)
+
+write.csv(All_Tat2_Stats, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Smooth_Statistics_Across_IronROIs_SES.csv', row.names = FALSE)
+
+``` 
+
+### Plots: 
+``` {r, echo = FALSE, fig.align='center'}
+
+All_Tat2_Stats$oLabel<-ordered(All_Tat2_Stats$Label,
+levels=c("E", "D", "C","B", "A", "Other","Non-Hispanic Black/AA", "Non-Hispanic White", "Hispanic", 
+         "Asian AIAN NHPI OTHER", "200k+","100k-199k","75k-99k","50k-74k", "25k-49k","<25k", 
+         "M","F","All"))
+
+All_Tat2_Pred$oLabel<-ordered(All_Tat2_Pred$Label,
+levels=c("E", "D", "C","B", "A", "Other","Non-Hispanic Black/AA", "Non-Hispanic White", "Hispanic", 
+         "Asian AIAN NHPI OTHER", "200k+","100k-199k","75k-99k","50k-74k", "25k-49k","<25k", 
+         "M","F","All"))
+
+col_scale_btc <- c("grey60","grey60","grey60","grey60","grey60","grey60",
+                   "grey60","grey60","grey60","grey60","grey60","grey60",
+                   "grey60","grey60","grey60","grey60","grey60","grey60",
+                   "#461248")
+
+# Age by Iron: All ROIs, no datapoints - across all SES factors, model predicted values 
+
+age1_ses <- ggplot(All_Tat2_Pred,
+                    aes(x=visit_age, y=predicted, color=oLabel))+
+  geom_line(linewidth = 1) + facet_wrap(~oROI, scales="free")+
+   scale_color_manual(values=col_scale_btc)+
+   theme(aspect.ratio=.5, legend.position = "none",
+                               strip.background = element_blank(),
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+  # scale_y_continuous(trans = "reverse")+ #Formatting best for all ROIs (different scales)
+        scale_y_continuous(trans = "reverse",limits = c(.0145, .0125))+#Formatting best for basal ganglia (main)
+scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+
+ labs(x = "\nAge",
+       y = "nT2*w\n")
+print(age1_ses)
+
+ggsave(age1_ses, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_AllROIs_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+# Age of Peak Iron Identified by smooth fits in GAM models
+age1_5_SES <- All_Tat2_Stats %>% 
+  ggplot(aes(x = max.age.fitted, y = oLabel, fill = oLabel)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  facet_wrap(~oROI, scales = "free")+
+    scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  labs(x = "\nAge of Peak nT2*w (Smooth)",
+       y = "Subgroup\n")+ 
+          # scale_x_continuous(limits = c(24, 30), breaks = seq(24, 30, by = 2))+ #Formatting best for basal ganglia (main)
+        # scale_x_continuous(limits = c(24, 30), breaks = seq(24, 30, by = 2))+ #Formatting best for consistency across all ROI
+  theme(aspect.ratio = 1.5,  
+        strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age1_5_SES)
+
+# Average derivative indicating rate of change (increase in this case)
+
+age2_5_SES <- All_Tat2_Stats %>% 
+  ggplot(aes(x = deriv_rate, y = oLabel, fill = oLabel)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  facet_wrap(~oROI, scales = "free")+
+    scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  labs(x = "\nRate of Increase",
+       y = "Subgroup\n")+
+  scale_x_continuous(trans = "reverse", limits = c(0, -.00015))+ 
+  theme(aspect.ratio = 1.5,
+                strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2),
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age2_5_SES)
+
+# Age of maturation indicated by last age where derivative did not contain 0 
+age3_5_SES <- All_Tat2_Stats %>% 
+  ggplot(aes(x = smooth.last.change, y = oLabel, fill = oLabel)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  facet_wrap(~oROI, scales = "free")+
+    scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+xlab("\nAge of Maturation") +
+  ylab("Subgroup\n") +
+            scale_x_continuous(limits = c(18, 30), breaks = seq(20, 30, by = 5))+
+  theme(aspect.ratio = 1.5,
+                  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age3_5_SES)
+
+
+age4_5_SES <- All_Tat2_Stats %>% 
+  ggplot(aes(x = smooth.peak.change, y = oLabel, fill = oLabel)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  facet_wrap(~oROI, scales = "free")+
+    scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+ 
+  xlab("\nPeak Change Age") +
+  ylab("Subgroup\n") +
+scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+
+  theme(aspect.ratio = 1.5,
+                  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age4_5_SES)
+
+
+# Age at which significant increases (first age where derivative did not include 0) started 
+age5_5_SES <- All_Tat2_Stats %>% 
+  ggplot(aes(x = smooth.decrease.onset, y = oLabel, fill = oLabel)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  facet_wrap(~oROI, scales = "free")+
+    scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  xlab("\nIncrease Onset (Age)") +
+  ylab("Subgroup\n") +
+              # scale_x_continuous(limits = c(12, 24), breaks = seq(12, 24, by = 4))+#Formatting best for consistency across ROIs
+              scale_x_continuous(limits = c(12, 20), breaks = seq(12, 20, by = 4))+#Formatting best for basal ganglia (main)
+  theme(aspect.ratio = 1.5,
+                  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age5_5_SES)
+
+
+# Age at which significant increases (upper age where derivative included 0) ended 
+age6_5_SES <- All_Tat2_Stats %>% 
+  ggplot(aes(x = smooth.decrease.offset, y = oLabel, fill = oLabel)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+facet_wrap(~oROI, scales = "free")+
+    scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+   labs(x = "\nIncrease Offset (Age)",
+       y = "Subgroup\n")+
+              scale_x_continuous(limits = c(24, 30), breaks = seq(24, 30, by = 2))+#Formatting best for basal ganglia (main)
+                # scale_x_continuous(limits = c(18, 30), breaks = seq(20, 30, by = 5))+#Formatting best for consistency across ROIs
+theme(aspect.ratio = 1.5,
+  legend.position = "none",
+            strip.background = element_blank(),
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age6_5_SES)
+ 
+
+ggsave(age1_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_AllROIs_Gam_Stats_PeakPerf_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age2_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_AllROIs_Gam_Stats_RateofInc_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age3_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_AllROIs_Gam_Stats_MatureAge_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age4_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_AllROIs_Gam_Stats_PeakChangeAge_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age5_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_AllROIs_Gam_Stats_IncOnsetAge_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age6_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_Age_AllROIs_Gam_Stats_IncOffsetAge_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+``` 
+
+# Substance Use Analyses
+## Subset DFs
+```{r, echo = FALSE, fig.align='center'}
+
+set.seed(1) #for consistency  
+
+SU_Vars_Iron <- All_Sites_Iron %>% 
+  dplyr::select(subject, visit, sex, visit_age, site, income_recode,raceeth_recode,
+                contains("past_30"),tat2.combat, roi, oROI)  
+
+SU_Vars_Iron$roi <- as.factor(SU_Vars_Iron$roi)
+
+### Subset DF 
+SU_Vars_Iron_Long <- All_Sites_Iron_Long %>% 
+  dplyr::select(subject, visit, sex, visit_age, site, income_recode,raceeth_recode,
+                contains("past_30"),contains("log_past30"), tat2.combat, Substance, oSubstance, Category, Usetype, 
+roi, oROI)  
+
+SU_Vars_Iron_Long$roi <- as.factor(SU_Vars_Iron_Long$roi)
+SU_Vars_Iron_Long$Substance <- as.factor(SU_Vars_Iron_Long$Substance)
+
+``` 
+
+### Continuous Variable Analysis: Substance use by Iron 
+#### Test whether effect of UPPS (overall) varies by substance
+```{r, echo = FALSE, fig.align='center'}
+
+# see if effect of iron differs across substances 
+GMM4_int <- bam(log_past30 ~ 1 + sex  +  income_recode + raceeth_recode + site + 
+    s(visit_age, k = 4, fx = F, bs = "cs") + 
+      oSubstance + 
+      s(tat2.combat, k = 3, fx = F)+
+    s(tat2.combat, oSubstance, bs = "sz", k =3, fx = F) +      
+      s(subject, bs = "re") + s(subject, visit_age, bs = "re"), #implement random effects, 
+    data = SU_Vars_Iron_Long %>% filter(oSubstance!="All Prob" & oROI=="BG"),
+    discrete = TRUE,
+    method = "fREML")
+summary(GMM4_int)
+anova(GMM4_int)
+
+ 
+int_gam.model_plot <- ggpredict(GMM4_int, terms = c("tat2.combat","oSubstance"))
+plot(int_gam.model_plot)
+
+
+mm <- hypothesis_test(GMM4_int, 
+                terms = c("tat2.combat","oSubstance"), test = NULL)
+
+  
+
+``` 
+
+
+#### Substance use: Test for Associations with nT2*w Across all Regions and Substances  
+
+```{r, echo = FALSE, fig.align='center'}
+
+#Loop over trial types & substances to get gamm model statistics
+
+roi <- levels(SU_Vars_Iron_Long$oROI)
+substance_levels <- levels(SU_Vars_Iron_Long$oSubstance)
+
+# Initialize output data frames
+gam.statistics <- data.frame(
+  oROI = factor(),
+  Substance = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_Rsq = numeric(),
+  GAM.smooth.pvalue = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  oROI = factor(), 
+  Substance = factor(),
+  corrat = numeric(), 
+  fitted = numeric(), 
+  fitted2 = numeric(), 
+  se = numeric(), 
+  lower_ci = numeric(), 
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  oROI = factor(), 
+  Substance = factor(),
+  corrat = numeric(), 
+  estimate = numeric(), 
+  se = numeric()
+)
+
+gam.pred <- data.frame(
+  oROI = factor(), 
+  Substance = factor(),
+  corrat = numeric(), 
+  predicted = numeric(), 
+  se = numeric(),
+  lower = numeric(), 
+  upper = numeric()
+)
+
+# Nested loop: for each ROI, loop over each Substance
+for (cog in roi) {
+  for (subst in substance_levels) {
+    
+    sub_df <- SU_Vars_Iron_Long %>%
+      filter(roi == cog, oSubstance == subst)
+    
+    # if (nrow(sub_df) == 0) next  # skip if no rows
+    
+    gam.model <- mgcv::gamm(
+      log_past30 ~ s(tat2.combat, fx = F, k = 3) + 
+        sex + income_recode + raceeth_recode + site + 
+        s(visit_age, fx = F, k = 4, bs = "cs"), 
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    np <- 200
+    thisPred <- data.frame(init = rep(0, np))
+    theseVars <- attr(gam.model$gam$terms, "term.labels")
+    varClasses <- attr(gam.model$gam$terms,"dataClasses")
+    thisResp <- as.character(gam.model$gam$terms[[2]])
+    smooth_var <- "tat2.combat"
+    
+    for (v in seq_along(theseVars)) {
+      thisVar <- theseVars[[v]]
+      thisClass <- varClasses[thisVar]
+      if (thisVar == smooth_var) {
+        thisPred[,smooth_var] <- seq(min(df[,smooth_var],na.rm=T),
+                                     max(df[,smooth_var],na.rm=T),
+                                     length.out = np)
+      } else {
+        switch(thisClass,
+               "numeric" = {thisPred[,thisVar] = median(df[,thisVar], na.rm=TRUE)},
+               "character" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]},
+               "factor" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]},
+               "ordered" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]}
+        )
+      }
+    }
+    pred <- thisPred %>% dplyr::select(-init)
+    
+    ## MODEL STATISTICS ##  
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      oROI = factor(cog, levels = roi),
+      Substance = factor(subst, levels = substance_levels),
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_Rsq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue
+    ))
+    
+    ## FITTED VALUES ##
+    gam.fittedvalues_temp <- gratia::fitted_values(object = gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    temp_fit <- data.frame(
+      oROI = factor(cog, levels = roi),
+      oSubstance = factor(subst, levels = substance_levels),
+      tat2.combat = gam.fittedvalues_temp$tat2.combat, 
+      fitted = gam.fittedvalues_temp$.fitted, 
+      fitted2 = gam.fittedvalues_temp$.fitted2, 
+      se = gam.fittedvalues_temp$.se, 
+      lower_ci = gam.fittedvalues_temp$.lower_ci, 
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    )
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, temp_fit)
+    
+    ## SMOOTH ESTIMATES ##
+    gam.smoothvalues_temp <- gratia::smooth_estimates(object = gam.model, data = pred, smooth = sprintf('s(%s)', smooth_var))
+    temp_smooth <- data.frame(
+      oROI = factor(cog, levels = roi),
+      oSubstance = factor(subst, levels = substance_levels),
+      tat2.combat = gam.smoothvalues_temp$tat2.combat, 
+      estimate = gam.smoothvalues_temp$.estimate,  
+      se = gam.smoothvalues_temp$.se
+    )
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, temp_smooth)
+    
+    ## GGPREDICT ##
+    gam.pred_temp <- ggpredict(gam.model, terms = c("tat2.combat"))
+    temp_pred <- data.frame(
+      oROI = factor(cog, levels = roi),
+      Substance = factor(subst, levels = substance_levels),
+      tat2.combat = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted, 
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low, 
+      upper = gam.pred_temp$conf.high
+    )
+    gam.pred <- bind_rows(gam.pred, temp_pred)
+  }
+}
+
+
+custom_order <- c("All Prob", "Alcohol", "Binge", "Cannabis", 
+                  "Nicotine")
+
+custom_order2 <- c("BG", "Caudate", "NAcc", "Pallidum", "Putamen")
+
+
+gam.statistics <- gam.statistics %>%
+  mutate(oROI = factor(oROI, levels = custom_order2),
+         Substance = factor(Substance, levels = custom_order)) %>%
+  arrange(Substance)
+
+
+write.csv(gam.statistics, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/SU_Iron_Statistics_Across_Regions_FullSample.csv.csv', row.names = FALSE)
+
+``` 
+
+#### Plots:
+```{r, echo = FALSE, fig.align='center'}
+
+                                                              
+gam.pred$Substance<-factor(gam.pred$Substance,
+levels=c("All Prob","Alcohol","Binge","Cannabis","Nicotine"))
+
+# nT2*w by Substance Use: All ROIs, all substances, no datapoints - model predicted values adjusting for age and relevant demographic factors 
+
+SU_Iron <- ggplot(gam.pred,
+                    aes(x=tat2.combat, y=predicted, color=Substance))+
+  facet_wrap(~oROI,scales="free")+
+    geom_smooth(method="gam", formula = y ~ s(x, k = 3, fx = FALSE), fullrange=F)+
+   scale_color_manual(values=substance_colorbar)+
+   scale_fill_manual(values=substance_colorbar)+
+     theme(aspect.ratio=.5, legend.position = "none",
+                                        strip.background = element_blank(),
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+   scale_x_continuous(trans = "reverse")+
+  labs(x = "\nnT2*w Score",
+       y = "Substance Use (log)\n")
+
+print(SU_Iron)
+
+
+ggsave(SU_Iron, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_SU_Cont_AllROI.pdf", device = "pdf", dpi = 500, width = 8, height = 8, units = "in")#
+
+
+gam.statistics$Substance <- ordered(gam.statistics$Substance, c("All Prob",
+                                                                                        "Alcohol",
+                                                                                        "Cannabis",
+                                                                                        "Nicotine",
+                                                                                        "Binge"))
+# Plots showing gam model F statistics for each comparison (substance)
+F1_5 <- gam.statistics %>% 
+  ggplot(aes(x = GAM.smooth_Fvalue, y = Substance, fill = Substance)) +
+  facet_wrap(~oROI, scales = "free")+
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = substance_colorbar2) +
+  labs(x = "\nF Statistic",
+       y = "Substance\n") +
+   scale_y_discrete(
+    breaks = c("All Prob", "Alcohol", "Cannabis", "Nicotine", "Binge"),
+    labels = c("All", "Alcohol", "Cannabis", "Nicotine", "Binge"))+ 
+  scale_x_continuous(breaks = c(0, 5, 10), limits = c(0, 11)) +
+  theme(aspect.ratio = 1.5,
+                        strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(F1_5)
+
+ggsave(F1_5, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_SU_AllROIs_Fval.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+
+``` 
+
+### Frequency Category Analysis: Substance use by Iron 
+```{r, echo = FALSE, fig.align='center'}
+
+
+SU_Vars_Cat_Long <- SU_Vars_Iron_Long %>% dplyr::select(subject, visit, sex, visit_age, site, income_recode,raceeth_recode,tat2.combat, oROI, oSubstance, Category)
+
+SU_Results.Iron <- data.frame(
+  oROI = factor(),
+  oSubstance = factor(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+gam.pred.Iron <- data.frame(
+  oROI = factor(),
+  oSubstance = factor(),
+  Drug_Category = factor(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# Loop through ROI × Substance
+for (s in unique(SU_Vars_Cat_Long$oROI)) {
+  for (sub in unique(SU_Vars_Cat_Long$oSubstance)) {
+    
+    # Subset data for this combo
+    sub_df <- SU_Vars_Cat_Long %>% 
+      filter(oROI == s, oSubstance == sub)
+    
+    # if (nrow(sub_df) == 0) next  # skip if no rows
+    
+    # Fit GAMM
+    model <- mgcv::gamm(
+      tat2.combat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + Category + income_recode + 
+        raceeth_recode + sex + site,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    # Extract ANOVA results
+    aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[1, 2]
+    p_val <- aov_result$pTerms.table[1, 3]
+    
+    SU_Results.Iron <- rbind(
+      SU_Results.Iron,
+      data.frame(
+        oROI = s,
+        oSubstance = sub,
+        F_value = round(F_val, 2),
+        p_value = signif(p_val, 2),
+        stringsAsFactors = FALSE
+      )
+    )
+    
+    # Predictions for "Category"
+    get_preds <- ggpredict(model$gam, terms = c("Category"))
+    
+    gam.pred.Iron <- rbind(
+      gam.pred.Iron,
+      data.frame(
+        oROI = s,
+        oSubstance = sub,
+        Drug_Category = get_preds$x,
+        predicted = get_preds$predicted,
+        se = get_preds$std.error,
+        lower = get_preds$conf.low,
+        upper = get_preds$conf.high
+      )
+    )
+  }
+}
+
+custom_order <- c("BG", "Caudate", "NAcc", "Pallidum", "Putamen")
+
+custom_order2 <- c("Never", "Ever", "Regular")
+
+custom_order3 <- c("All Prob", "Alcohol", "Binge","Cannabis","Nicotine")
+
+# Convert to factor with levels in custom order
+SU_Results.Iron_All <- SU_Results.Iron %>%
+  mutate(oROI = factor(oROI, levels = custom_order)) %>%
+  mutate(oSubstance = factor(oSubstance, levels = custom_order3)) %>%
+  arrange(oSubstance, oROI)
+
+gam.pred.Iron_All <- gam.pred.Iron %>%
+  mutate(Drug_Category = factor(Drug_Category, levels = custom_order2),
+         oROI = factor(oROI, levels = custom_order)) %>%
+    mutate(oSubstance = factor(oSubstance, levels = custom_order3)) %>%
+  arrange(oSubstance, oROI, Drug_Category)
+
+
+write.csv(SU_Results.Iron_All, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Main_Effects_FreqCategories_Across_IronROIs.csv', row.names = FALSE)
+
+write.csv(gam.pred.Iron_All, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Predicted_FreqCategories_Across_IronROIs.csv', row.names = FALSE)
+
+
+
+``` 
+
+#### Plots: 
+```{r, echo = FALSE, fig.align='center'}
+  
+
+
+# Plots showing nT2*w by substance use category groups - model predictions adjusted for age and relevant covariates
+
+Freq1_5 <- gam.pred.Iron_All %>% 
+  ggplot(aes(x = Drug_Category, y = predicted, fill = oSubstance)) +
+  facet_wrap(~oROI, scales = "free")+
+  geom_point(shape = 21, size = 2.5, color = "white",position = position_dodge(0.3)) +
+  scale_fill_manual(values = substance_colorbar) +
+  labs(x = "\nFrequency",
+       y = "nT2*w\n")+
+  # scale_y_continuous(trans = "reverse")+ #Formatting best for all ROIs (different scales)
+      scale_y_continuous(trans = "reverse",limits = c(.01393, .01378))+#Formatting best for basal ganglia (main)
+  theme(aspect.ratio = .5,
+                strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(Freq1_5)
+
+ggsave(Freq1_5, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_SU_FreqCat_AllROIs.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+   
+
+``` 
+
+### Usetype Category Analysis: Substance use by UPPS 
+```{r, echo = FALSE, fig.align='center'}
+  
+
+SU_Vars_Use_Long <- SU_Vars_Iron_Long %>% dplyr::select(subject, visit, sex, visit_age, site, income_recode,raceeth_recode,tat2.combat, oROI, oSubstance, Usetype)
+
+
+SU_UT_Results.Iron <- data.frame(
+  oROI = factor(),
+  oSubstance = factor(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+gam.pred.UT_Iron <- data.frame(
+  oROI = factor(),
+  oSubstance = factor(),
+  Drug_Category = factor(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# Loop through ROI × Substance
+for (s in unique(SU_Vars_Use_Long$oROI)) {
+  for (sub in unique(SU_Vars_Use_Long$oSubstance)) {
+    
+    # Subset data for this combo
+    sub_df <- SU_Vars_Use_Long %>% 
+      filter(oROI == s, oSubstance == sub)
+    
+    # if (nrow(sub_df) == 0) next  # skip if no rows
+    
+    # Fit GAMM
+    model <- mgcv::gamm(
+      tat2.combat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + Usetype + income_recode + 
+        raceeth_recode + sex + site,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    # Extract ANOVA results
+    aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[1, 2]
+    p_val <- aov_result$pTerms.table[1, 3]
+    
+    SU_UT_Results.Iron <- rbind(
+      SU_UT_Results.Iron,
+      data.frame(
+        oROI = s,
+        oSubstance = sub,
+        F_value = round(F_val, 2),
+        p_value = signif(p_val, 2),
+        stringsAsFactors = FALSE
+      )
+    )    
+
+    
+    # Predictions for "Usetype"
+    get_preds <- ggpredict(model$gam, terms = c("Usetype"))
+    
+    gam.pred.UT_Iron <- rbind(
+      gam.pred.UT_Iron,
+      data.frame(
+        oROI = s,
+        oSubstance = sub,
+        Drug_Category = get_preds$x,
+        predicted = get_preds$predicted,
+        se = get_preds$std.error,
+        lower = get_preds$conf.low,
+        upper = get_preds$conf.high
+      )
+    )
+  }
+}
+
+custom_order <- c("BG", "Caudate", "NAcc", "Pallidum", "Putamen")
+
+custom_order2 <- c("no-use", "single-use", "co-use", "poly-use")
+
+custom_order3 <- c("All Prob", "Alcohol", "Binge","Cannabis","Nicotine")
+
+# Convert to factor with levels in custom order
+SU_UT_Results.Iron_All <- SU_UT_Results.Iron %>%
+  mutate(oROI = factor(oROI, levels = custom_order)) %>%
+  mutate(oSubstance = factor(oSubstance, levels = custom_order3)) %>%
+  arrange(oSubstance, oROI)
+
+gam.pred.UT_Iron_All <- gam.pred.UT_Iron %>%
+  mutate(Drug_Category = factor(Drug_Category, levels = custom_order2),
+         oROI = factor(oROI, levels = custom_order)) %>%
+    mutate(oSubstance = factor(oSubstance, levels = custom_order3)) %>%
+  arrange(oSubstance, oROI, Drug_Category)
+
+
+write.csv(SU_UT_Results.Iron_All, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Main_Effects_UsetypeCategories_Across_IronROIs.csv', row.names = FALSE)
+
+write.csv(gam.pred.UT_Iron_All, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Predicted_UsetypeCategories_Across_IronROIs.csv', row.names = FALSE)
+
+``` 
+
+
+
+#### Plots: 
+```{r, echo = FALSE, fig.align='center'}
+  
+
+# Plots showing Iron by substance use use-type groups - model predictions adjusted for age and relevant covariates
+
+
+Usetype1_5 <- gam.pred.UT_Iron_All %>% 
+  ggplot(aes(x = Drug_Category, y = predicted, fill = oSubstance)) +
+  facet_wrap(~oROI, scales = "free")+
+  geom_point(shape = 21, size = 2.5, color = "white",position = position_dodge(0.3)) +
+  scale_fill_manual(values = substance_colorbar) +
+  labs(x = "\nUse-Type",
+       y = "nT2*w\n")+
+      # scale_y_continuous(trans = "reverse"), #Formatting best for consistency among ROIs.
+        scale_y_continuous(trans = "reverse",limits = c(.01395, .01376))+# #Formatting best for basal ganglia (main)
+  theme(aspect.ratio = .5,
+  legend.position = "none",
+                  strip.background = element_blank(),
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(Usetype1_5)
+
+ggsave(Usetype1_5, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Iron_SU_UseTypeCat_AllROIs.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+   
+
+``` 
