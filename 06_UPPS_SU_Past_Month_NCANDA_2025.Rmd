@@ -1,0 +1,3394 @@
+---
+title: "Age-Related Changes in Impulsivity and Relationships with Substance Use"
+author: Ashley C. Parr
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output: pdf_document
+---
+
+# IMPULSIVITY ANALYSES  
+
+```{r, include=FALSE}
+# 
+if(!is.null(dev.list())) dev.off()# Clear plots
+cat("\014") # Clear console
+rm(list=ls())# Clean workspace
+
+library(rmarkdown)
+library(tinytex)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(LNCDR)
+library(mgcv)
+library(readr)
+library(RColorBrewer)
+library(ggpubr)
+library(plotrix)
+library(ggeffects)
+
+knitr::opts_chunk$set(out.width="50%", out.height="50%", warning = FALSE, 
+                      fig.pos = 'H', dev = 'png', dpi=150)
+
+
+library(showtext)
+font_add("Arial", "/System/Library/Fonts/Supplemental/Arial.ttf")  # Use the actual file path
+showtext_auto()
+
+```      
+
+# Housekeeping
+## Bring in Relevant Files, Merge, & Clean  
+```{r, echo=FALSE}
+
+All_Sites_Substance <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/ALL_SITES_SUBSTANCE_CLEANED_y8_newnicotine_08042025.RData"
+All_Sites_Substance1 <- load(All_Sites_Substance)
+
+Long_Substance <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/LONG_SUBSTANCE_y8_newnicotine_08042025.RData"
+Long_Substance1 <- load(Long_Substance)
+
+#Get rid of 'all' since using probabilistic score 
+Long_Substance <- Long_Substance %>% filter(Substance!="All" & Substance !="All Mean")
+
+Long_Substance$Substance <- droplevels(Long_Substance$Substance)
+Long_Substance$oSubstance <- droplevels(Long_Substance$oSubstance)
+
+
+Long_UPPS <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/LONG_UPPS_y8_newnicotine_08042025.RData"
+Long_UPPS1 <- load(Long_UPPS) 
+
+# Get rid of 'total' since using mean instead 
+Long_UPPS <- Long_UPPS %>% filter(Subscale!="Total" & oSubscale!="Total")
+Long_UPPS$Subscale <- droplevels(Long_UPPS$Subscale)
+Long_UPPS$oSubscale <- droplevels(Long_UPPS$oSubscale)
+
+
+
+Long_UPPS$oSubscale_plot<-ordered(Long_UPPS$oSubscale,
+                                           levels=c("Mean","Pos Urg","Neg Urg",
+                                                    "Sensation Seeking","Premeditation",
+                                                    "Perseverance"))
+ 
+
+
+All_Sites_Substance$oSite<-ordered(All_Sites_Substance$site,
+                                           levels=c("E","D","C","B","A"))
+ 
+Long_Substance$oSite<-ordered(Long_Substance$site,
+                                           levels=c("E","D","C","B","A"))
+ 
+
+All_Sites_Substance$oIncome_recode2<-ordered(All_Sites_Substance$income_recode,
+                                           levels=c("200k+","100k-199k",
+                                                    "75k-99k","50k-74k","25k-49k",
+                                                    "<25k"))
+ 
+Long_Substance$oIncome_recode2<-ordered(Long_Substance$income_recode,
+                                           levels=c("200k+","100k-199k",
+                                                    "75k-99k","50k-74k","25k-49k",
+                                                    "<25k"))
+
+
+All_Sites_Substance$oRaceeth_recode2<-ordered(All_Sites_Substance$raceeth_recode,
+                                           levels=c("Other",
+                                                    "Non-Hispanic Black/AA",
+                                                    "Non-Hispanic White",
+                                                    "Hispanic",
+                                                    "Asian AIAN NHPI OTHER"))
+ 
+Long_Substance$oRaceeth_recode2<-ordered(Long_Substance$raceeth_recode,
+                                           levels=c("Other",
+                                                    "Non-Hispanic Black/AA",
+                                                    "Non-Hispanic White",
+                                                    "Hispanic",
+                                                    "Asian AIAN NHPI OTHER"))
+
+
+All_Sites_Substance$oSex<-ordered(All_Sites_Substance$sex,
+                                           levels=c("M",
+                                                    "F"))
+ 
+Long_Substance$oSex<-ordered(Long_Substance$sex,
+                                           levels=c("M",
+                                                    "F"))
+
+
+All_Sites_subs_short <- merge(Long_UPPS, All_Sites_Substance, by = c("subject", "visit",
+                                                                    "sex",
+                                                                    "visit_age"),
+                             all.y = TRUE)
+# 
+
+All_Sites_All_Long <- merge(Long_UPPS, Long_Substance, by = c("subject", "visit",
+                                                                    "sex",
+                                                                    "visit_age"),
+                             all.y = TRUE)
+
+``` 
+
+## Calculate Summary Stats: Mean, Peak ages, Peak UPPS, ETC. Across full sample & Demographic Factors 
+```{r, echo=FALSE, fig.align = "center"}
+ 
+All_Sites_subs_short <- All_Sites_subs_short %>%
+  group_by(subject, Subscale) %>%
+  dplyr::mutate(
+    valid_scores = !is.na(Score),
+    peak_age_UPPS = if(any(valid_scores)) visit_age[which.max(ifelse(valid_scores, Score, -Inf))] else NA_real_,
+    peak_UPPS = if(any(valid_scores)) max(Score, na.rm = TRUE) else NA_real_  # Changed this line!
+  ) %>% 
+  dplyr::select(-valid_scores)
+
+subscale_summary <- All_Sites_subs_short %>%
+  group_by(Subscale) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_UPPS = mean(Score[Subscale == cur_group()$Subscale], na.rm = TRUE),
+    sd_UPPS = std.error(Score[Subscale == cur_group()$Subscale], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_UPPS = mean(peak_UPPS, na.rm = TRUE),
+    sd_peak_UPPS = std.error(peak_UPPS, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_UPPS = mean(peak_age_UPPS, na.rm = TRUE),
+    SD_peak_age_UPPS = std.error(peak_age_UPPS, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_UPPS)),
+    .groups = "drop"
+  )
+  
+# subscale_summary[] <- lapply(subscale_summary, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+write.csv(subscale_summary, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Summary_Table_Across_UPPS_Subscales_FullSample.csv', row.names = FALSE)
+
+
+subscale_summary_sex <- All_Sites_subs_short %>%
+  group_by(Subscale, sex) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_UPPS = mean(Score[Subscale == cur_group()$Subscale], na.rm = TRUE),
+    sd_UPPS = std.error(Score[Subscale == cur_group()$Subscale], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_UPPS = mean(peak_UPPS, na.rm = TRUE),
+    sd_peak_UPPS = std.error(peak_UPPS, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_UPPS = mean(peak_age_UPPS, na.rm = TRUE),
+    SD_peak_age_UPPS = std.error(peak_age_UPPS, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_UPPS)),
+    .groups = "drop"
+  )
+  
+subscale_summary_income <- All_Sites_subs_short %>%
+  group_by(Subscale, oIncome_recode) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_UPPS = mean(Score[Subscale == cur_group()$Subscale], na.rm = TRUE),
+    sd_UPPS = std.error(Score[Subscale == cur_group()$Subscale], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_UPPS = mean(peak_UPPS, na.rm = TRUE),
+    sd_peak_UPPS = std.error(peak_UPPS, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_UPPS = mean(peak_age_UPPS, na.rm = TRUE),
+    SD_peak_age_UPPS = std.error(peak_age_UPPS, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_UPPS)),
+    .groups = "drop"
+  )
+
+
+subscale_summary_race <- All_Sites_subs_short %>%
+  group_by(Subscale, oRaceeth_recode) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_UPPS = mean(Score[Subscale == cur_group()$Subscale], na.rm = TRUE),
+    sd_UPPS = std.error(Score[Subscale == cur_group()$Subscale], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_UPPS = mean(peak_UPPS, na.rm = TRUE),
+    sd_peak_UPPS = std.error(peak_UPPS, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_UPPS = mean(peak_age_UPPS, na.rm = TRUE),
+    SD_peak_age_UPPS = std.error(peak_age_UPPS, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_UPPS)),
+    .groups = "drop"
+  )
+
+
+subscale_summary_site <- All_Sites_subs_short %>%
+  group_by(Subscale, site) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_UPPS = mean(Score[Subscale == cur_group()$Subscale], na.rm = TRUE),
+    sd_UPPS = std.error(Score[Subscale == cur_group()$Subscale], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_UPPS = mean(peak_UPPS, na.rm = TRUE),
+    sd_peak_UPPS = std.error(peak_UPPS, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_UPPS = mean(peak_age_UPPS, na.rm = TRUE),
+    SD_peak_age_UPPS = std.error(peak_age_UPPS, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_UPPS)),
+    .groups = "drop"
+  )
+
+
+subscale_summary_sex <- subscale_summary_sex %>%
+  dplyr::rename(Label = sex)
+subscale_summary_income <- subscale_summary_income %>%
+ dplyr::rename(Label = oIncome_recode)
+subscale_summary_race <- subscale_summary_race %>%
+  dplyr::rename(Label = oRaceeth_recode)
+subscale_summary_site <- subscale_summary_site %>%
+  dplyr::rename(Label = site)
+subscale_summary$Label <- "All"
+
+Long_means_all_SES <- rbind(subscale_summary_sex, subscale_summary_income, 
+                            subscale_summary_race, subscale_summary_site,subscale_summary)
+
+# Long_means_all_SES[] <- lapply(Long_means_all_SES, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+#Arrange by Subscale
+Long_means_all_SES <- Long_means_all_SES %>%
+  arrange(Subscale)
+
+
+write.csv(Long_means_all_SES, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Summary_Table_Across_UPPSSubscales_SES.csv', row.names = FALSE)
+ 
+ 
+``` 
+
+## Clean Environment 
+```{r, echo = FALSE, fig.align='center'}
+
+rm(list=ls()[! ls() %in% c("All_Sites_Substance","Long_Substance",
+                           "Long_UPPS_grmeans", "Long_UPPS",
+                           "All_Sites_All_Long",
+                           "All_Sites_subs_short","peakdens.peak_age",
+                           "Long_peak_means_all_SES","Long_means_all_SES","Demo_All_violin",
+                           "subscale_summary")])
+
+
+``` 
+
+## Set colors  
+```{r, echo = FALSE, fig.align='center'}
+ 
+substance_colorbar <- c("#260C51", "#EA464C", "#7B02A8", "#079287", "#EAB720")
+substance_colorbar2 <- c("#260C51", "#EA464C", "#079287", "#EAB720", "#7B02A8")
+
+upps_colorbar <- c("#0D1C55","#335DA3","#6AB1D0","#387F88","#51b8bf","#A6D6C9")  
+upps_colorbar2 <- c("#0D1C55","#387F88","#6AB1D0","#335DA3","#A6D6C9","#51b8bf")  
+ 
+library(scales)
+Demo_Colors <- colorRampPalette(c("#F5F5F9","#0D1C55"))(length(unique(Long_means_all_SES$Label)))
+
+
+``` 
+
+## Subset DFs
+```{r, echo = FALSE, fig.align='center'}
+
+set.seed(1) #for consistency in derivatives + derivative credible intervals
+
+### Subset DF 
+Demo_Vars <- All_Sites_Substance %>% dplyr::select(subject, visit, sex, visit_age, site,
+                                                    income_recode,raceeth_recode,oIncome_recode,
+                                                   oRaceeth_recode)  
+
+Long_UPPS <- merge(Long_UPPS, Demo_Vars, by = c("subject","visit","visit_age","sex"), all.x = T)
+
+Long_UPPS$oSex<-ordered(Long_UPPS$sex,
+                                          levels=c("F","M"))
+
+Long_UPPS$oSite<-ordered(Long_UPPS$site,
+                                          levels=c("A","B","C","D","E"))
+
+
+All_Sites_subs_short$oSex2<-ordered(All_Sites_subs_short$sex,
+                                          levels=c("F","M"))
+
+All_Sites_subs_short$oSite2<-ordered(All_Sites_subs_short$site,
+                                          levels=c("A","B","C","D","E"))
+``` 
+
+# Test for Differences in UPPS Magnitude/Mean/Peak across Subscales and Demographic Factors 
+## Full Sample
+```{r, echo = FALSE, fig.align='center'}
+
+# Across Subscales
+gam.model_UPPS <- mgcv::gamm(
+  Score ~ s(visit_age, k = 4, fx = F, bs = "cs") + oSubscale + oSex + oIncome_recode + oRaceeth_recode + oSite,
+  random = list(subject = ~1, subject = ~0 + visit_age),  # <- combined intercept & slope
+  data = Long_UPPS %>% 
+    filter(oSubscale != "Mean"),
+  method = "REML")
+summary(gam.model_UPPS$gam)
+anova(gam.model_UPPS$gam)  
+
+``` 
+
+### Plots: 
+
+```{r, echo = FALSE, fig.align='center'}
+
+# Violin plot showing distribution + Mean 
+UPPS_Violin <- All_Sites_subs_short %>%
+  ggplot( aes(y=oSubscale_plot, x=Score, fill=oSubscale_plot, color=oSubscale_plot)) +
+  scale_color_manual(values=upps_colorbar2)+ 
+   scale_fill_manual(values=upps_colorbar2)+  
+    geom_violin(width=1, size=0.2,adjust = 2) +
+      stat_summary(fun = mean, geom = "point", shape = 15, size = 3, color = "black") +   
+    theme(aspect.ratio=1.5, legend.position = "none",
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+  labs(x = "\nScore",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))
+
+
+print(UPPS_Violin)
+
+subscale_summary$oSubscale<-ordered(subscale_summary$Subscale,
+levels=c("Mean", "Pos Urg", "Neg Urg","Sensation Seeking", "Premeditation", "Perseverance"))
+
+peakdens.peak_age = dplyr::select(All_Sites_subs_short[!is.na(All_Sites_subs_short$peak_age_UPPS),],
+                             oSubscale, peak_age_UPPS) %>%
+                               group_by(oSubscale) %>%
+                               summarise(Max_Dense = density(peak_age_UPPS)$x[which.max(density(peak_age_UPPS, na.rm=T)$y)])
+
+# Density plot showing distributions of peak ages 
+UPPS_dense_peak <- ggplot(All_Sites_subs_short, aes(x = peak_age_UPPS, group = oSubscale, colour = oSubscale)) +
+  scale_color_manual(values=upps_colorbar)+
+  geom_density(linewidth = 1, bw = .80) + 
+   theme(aspect.ratio=1.5, legend.position = "none",
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+    scale_x_continuous(limits = c(10, 30), breaks = seq(10, 30, by = 10))+
+    # geom_vline(data = subscale_summary, aes(xintercept=mean_peak_age_UPPS,color = oSubscale), linetype="dashed") +
+    labs(x = "\nAge of Peak UPPS",
+       y = "Density\n")
+plot(UPPS_dense_peak)
+
+UPPS_Dists <- ggarrange(UPPS_Violin, UPPS_dense_peak, 
+                    ncol = 3, nrow = 1)
+UPPS_Dists
+
+ggsave(UPPS_Dists, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Distributions_AllTrials.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+
+subscale_summary$oSubscale<-ordered(subscale_summary$Subscale,
+levels=c("Mean", "Pos Urg", "Neg Urg","Sensation Seeking", "Premeditation","Perseverance"))
+
+#Mean UPPS (impulsivity)
+p1_5 <- subscale_summary %>% ungroup () %>%  
+  ggplot(aes(x = mean_UPPS, y = oSubscale, fill = oSubscale)) +  
+  geom_point(shape = 21, size = 5.5, color = "white") +
+           scale_x_continuous(limits = c(1.5, 3), breaks = seq(1.5, 3, by = .5))+  
+  scale_fill_manual(values = upps_colorbar2) +
+labs(x = "\nUPPS Score",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p1_5)
+
+#Mean Peak Impulsivity
+p2_5 <- subscale_summary %>% ungroup () %>%  
+  ggplot(aes(x = mean_peak_UPPS, y = oSubscale, fill = oSubscale)) +  
+  geom_point(shape = 21, size = 5.5, color = "white") +
+    scale_x_continuous(limits = c(2, 3.5), breaks = seq(2, 3.5, by = .5))+  
+  scale_fill_manual(values = upps_colorbar2) +
+  labs(x = "\nPeak UPPS Score",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p2_5)
+
+#Mean Age of Peak Impulsivity
+p3_5 <- subscale_summary %>% ungroup () %>%  
+  ggplot(aes(x = mean_peak_age_UPPS, y = oSubscale, fill = oSubscale)) +  
+  geom_point(shape = 21, size = 5.5, color = "white") +
+      scale_x_continuous(limits = c(17.5, 18.5), breaks = seq(17.5, 18.5, by = .5))+  
+  scale_fill_manual(values = upps_colorbar2) +
+  labs(x = "\nAge of Peak UPPS Score",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p3_5)
+
+
+UPPS_Summ <- ggarrange(p1_5, p2_5, p3_5, 
+                    ncol = 3, nrow = 1)
+UPPS_Summ
+
+ggsave(UPPS_Summ, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_MeanPeakPAge_AllSubscales.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+
+
+#Mean & SE UPPS (impulsivity)
+p1_5_SE <- ggplot(subscale_summary, aes(mean_UPPS, oSubscale)) +
+  geom_pointrange(
+    aes(xmin = mean_UPPS-sd_UPPS, xmax = mean_UPPS+sd_UPPS, color = oSubscale),
+    position = position_dodge(0.3))+ 
+      geom_point(shape = 21, size = 5.5, color = NA) +
+      scale_x_continuous(limits = c(1.5, 3), breaks = seq(1.5, 3, by = .5))+  
+       scale_color_manual(values=upps_colorbar2)+ 
+  scale_fill_manual(values = upps_colorbar2) +
+labs(x = "\nUPPS Score",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p1_5_SE)
+ 
+  
+#Mean & SE Peak Impulsivity
+p2_5_SE <- ggplot(subscale_summary, aes(mean_peak_UPPS, oSubscale)) +
+  geom_pointrange(
+    aes(xmin = mean_peak_UPPS-sd_peak_UPPS, xmax = mean_peak_UPPS+sd_peak_UPPS, color = oSubscale),
+    position = position_dodge(0.3))+ 
+      geom_point(shape = 21, size = 5.5, color = NA) +
+        scale_x_continuous(limits = c(2, 3.5), breaks = seq(2, 3.5, by = .5))+ 
+  scale_fill_manual(values = upps_colorbar2) +
+  scale_color_manual(values = upps_colorbar2) +
+  labs(x = "\nPeak UPPS Score",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p2_5_SE)
+
+
+#Mean & SE Age of Peak Impulsivity
+p3_5_SE <- ggplot(subscale_summary, aes(mean_peak_age_UPPS, oSubscale)) +
+  geom_pointrange(
+    aes(xmin = mean_peak_age_UPPS-SD_peak_age_UPPS, xmax = mean_peak_age_UPPS+SD_peak_age_UPPS, color = oSubscale),
+    position = position_dodge(0.3))+ 
+      geom_point(shape = 21, size = 5.5, color = NA) +
+          scale_x_continuous(limits = c(17.5, 18.5), breaks = seq(17.5, 18.5, by = .5))+ 
+  scale_fill_manual(values = upps_colorbar2) +
+  scale_color_manual(values = upps_colorbar2) +
+    labs(x = "\nAge of Peak UPPS Score",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p3_5_SE)
+
+
+UPPS_Summ_SE <- ggarrange(p1_5_SE, p2_5_SE, p3_5_SE, 
+                    ncol = 3, nrow = 1)
+UPPS_Summ_SE
+
+ggsave(UPPS_Summ_SE, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_MeanPeakPAge_SE_AllSubscales.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+``` 
+
+## Demographic Factors 
+```{r, echo = FALSE, fig.align='center'}
+
+# Initialize empty results data frame
+UPPS_Results.sex <- data.frame(
+  oSubscale = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(Long_UPPS$oSubscale)) {
+  
+  # Subset data for the current substance
+  sub_df <- Long_UPPS %>% filter(oSubscale == s)
+  # Try fitting the model
+  model <- mgcv::gamm(
+      Score ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + oSex,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    UPPS_Results.sex <- rbind(UPPS_Results.sex, data.frame(
+      oSubscale = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+UPPS_Results.sex$Label <- "Sex"
+
+
+# Initialize empty results data frame
+UPPS_Results.income <- data.frame(
+  oSubscale = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(Long_UPPS$oSubscale)) {
+  
+  # Subset data for the current substance
+  sub_df <- Long_UPPS %>% filter(oSubscale == s)
+  # Try fitting the model
+  model <- mgcv::gamm(
+      Score ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + oIncome_recode,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    UPPS_Results.income <- rbind(UPPS_Results.income, data.frame(
+      oSubscale = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+UPPS_Results.income$Label <- "Income"
+
+
+# Initialize empty results data frame
+UPPS_Results.raceeth <- data.frame(
+  oSubscale = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(Long_UPPS$oSubscale)) {
+  
+  # Subset data for the current substance
+  sub_df <- Long_UPPS %>% filter(oSubscale == s)
+  # Try fitting the model
+  model <- mgcv::gamm(
+      Score ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + oRaceeth_recode,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    UPPS_Results.raceeth <- rbind(UPPS_Results.raceeth, data.frame(
+      oSubscale = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+UPPS_Results.raceeth$Label <- "Race/Eth"
+
+
+
+# Initialize empty results data frame
+UPPS_Results.site <- data.frame(
+  oSubscale = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(Long_UPPS$oSubscale)) {
+  
+  # Subset data for the current substance
+  sub_df <- Long_UPPS %>% filter(oSubscale == s)
+  # Try fitting the model
+  model <- mgcv::gamm(
+      Score ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + oSite,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    UPPS_Results.site <- rbind(UPPS_Results.site, data.frame(
+      oSubscale = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+UPPS_Results.site$Label <- "Site"
+
+#Peak UPPS
+
+unique_peak_df <- dplyr::select(All_Sites_subs_short, subject, sex, oIncome_recode, oRaceeth_recode, site, peak_UPPS, peak_age_UPPS,Subscale) 
+unique_peak_df <- unique(unique_peak_df)
+
+
+# Across Subscales 
+gam.model_peakUPPS <- mgcv::gam(
+  peak_UPPS ~ Subscale + sex + oIncome_recode + oRaceeth_recode + site,
+  data = unique_peak_df %>% 
+    filter(Subscale != "Mean"),
+  method = "REML")
+summary(gam.model_peakUPPS)
+anova(gam.model_peakUPPS)  
+  
+
+# Initialize empty results data frame
+UPPS_Peak_Results.sex <- data.frame(
+  oSubscale = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubscale
+for (s in unique(unique_peak_df$Subscale)) {
+  
+  # Subset data for the current substance
+  sub_df <- unique_peak_df %>% filter(Subscale == s)
+  # Try fitting the model
+  model <- mgcv::gam(
+      peak_UPPS ~ sex,
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    UPPS_Peak_Results.sex <- rbind(UPPS_Peak_Results.sex, data.frame(
+      oSubscale = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+UPPS_Peak_Results.sex$Label <- "Sex"
+
+# Initialize empty results data frame
+UPPS_Peak_Results.income <- data.frame(
+  oSubscale = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubscale
+for (s in unique(unique_peak_df$Subscale)) {
+  
+  # Subset data for the current substance
+  sub_df <- unique_peak_df %>% filter(Subscale == s)
+  # Try fitting the model
+  model <- mgcv::gam(
+      peak_UPPS ~ oIncome_recode,
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    UPPS_Peak_Results.income <- rbind(UPPS_Peak_Results.income, data.frame(
+      oSubscale = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+UPPS_Peak_Results.income$Label <- "Income"
+
+
+# Initialize empty results data frame
+UPPS_Peak_Results.raceeth <- data.frame(
+  oSubscale = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(unique_peak_df$Subscale)) {
+  
+  # Subset data for the current substance
+  sub_df <- unique_peak_df %>% filter(Subscale == s)
+  # Try fitting the model
+  model <- mgcv::gam(
+      peak_UPPS ~ oRaceeth_recode,
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    UPPS_Peak_Results.raceeth <- rbind(UPPS_Peak_Results.raceeth, data.frame(
+      oSubscale = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+UPPS_Peak_Results.raceeth$Label <- "Race/Eth"
+
+
+# Initialize empty results data frame
+UPPS_Peak_Results.site <- data.frame(
+  oSubscale = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubscale
+for (s in unique(unique_peak_df$Subscale)) {
+  
+  # Subset data for the current substance
+  sub_df <- unique_peak_df %>% filter(Subscale == s)
+  # Try fitting the model
+  model <- mgcv::gam(
+      peak_UPPS ~ site,
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    UPPS_Peak_Results.site <- rbind(UPPS_Peak_Results.site, data.frame(
+      oSubscale = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+UPPS_Peak_Results.site$Label <- "Site"
+
+
+#Combine models for data tables 
+Main_Eff_Demo_Mean <- rbind(UPPS_Results.sex, UPPS_Results.income, UPPS_Results.raceeth, UPPS_Results.site)
+
+custom_order <- c("Mean", "Neg Urg", "Perseverance", "Pos Urg", "Premeditation", "Sensation Seeking")
+
+# Convert to factor with levels in custom order
+Main_Eff_Demo_Mean <- Main_Eff_Demo_Mean %>%
+  mutate(oSubscale = factor(oSubscale, levels = custom_order)) %>%
+  arrange(oSubscale)
+
+#Combine models for data tables 
+Main_Eff_Demo_Peak <- rbind(UPPS_Peak_Results.sex, UPPS_Peak_Results.income, UPPS_Peak_Results.raceeth, UPPS_Peak_Results.site)
+
+Main_Eff_Demo_Peak <- Main_Eff_Demo_Peak %>%
+  mutate(oSubscale = factor(oSubscale, levels = custom_order)) %>%
+  arrange(oSubscale)
+
+Main_Eff_Demo_Mean[] <- lapply(Main_Eff_Demo_Mean, function(x) if (is.numeric(x)) round(x, 2) else x)
+Main_Eff_Demo_Peak[] <- lapply(Main_Eff_Demo_Peak, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+write.csv(Main_Eff_Demo_Mean, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Main_Effects_SociodemographicFacs_Across_UPPSSubscales.csv', row.names = FALSE)
+
+write.csv(Main_Eff_Demo_Peak, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Peak_Main_Effects_SociodemographicFacs_Across_UPPSSubstances.csv', row.names = FALSE)
+
+``` 
+
+### Plots: 
+```{r, echo = FALSE, fig.align='center'}
+
+#Order the demographic factors accordingly 
+Long_means_all_SES$oLabel<-ordered(Long_means_all_SES$Label,
+levels=c("E", "D", "C","B", "A", "Other","Non-Hispanic Black/AA", "Non-Hispanic White", "Hispanic", 
+         "Asian AIAN NHPI OTHER", "200k+","100k-199k","75k-99k","50k-74k", "25k-49k","<25k", 
+         "M","F","All"))
+
+
+#Mean UPPS across sociodemographic factors 
+p1_5_SES <- Long_means_all_SES %>% ungroup () %>%  
+  ggplot(aes(x = mean_UPPS, y = oLabel, fill = oLabel)) + facet_wrap(~Subscale, scales = "free")+
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  geom_point(shape = 21, size = 2.5, color = "white") +
+  labs(x = "\nUPPS Score",
+       y = "Subgroup\n") +
+         scale_x_continuous(limits = c(1.75, 2.25), breaks = seq(1.80, 2.2, by = .20))+ #Formatting best for mean UPPS
+      # scale_x_continuous(limits = c(1.5, 3), breaks = seq(1.5, 3, by = .5))+ #Formatting best for consistency across all subscales
+  theme(aspect.ratio = 1.5,
+                       strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p1_5_SES)
+ 
+#Mean Peak UPPS across sociodemographic factors 
+p2_5_SES <- Long_means_all_SES %>% ungroup () %>%  
+  ggplot(aes(x = mean_peak_UPPS, y = oLabel, fill = oLabel)) + facet_wrap(~Subscale, scales = "free")+
+  scale_color_manual(values=Demo_Colors)+  
+  scale_fill_manual(values=Demo_Colors)+  
+  geom_point(shape = 21, size = 2.5, color = "white") +
+  labs(x = "\nPeak UPPS",
+       y = "Subgroup\n") +
+           scale_x_continuous(limits = c(2, 2.5), breaks = seq(2, 2.5, by = .25))+ #Formatting best for mean UPPS
+      # scale_x_continuous(limits = c(1.5, 3.5), breaks = seq(1.5, 3.5, by = .5))+ #Formatting best for consistency across all subscales
+  theme(aspect.ratio = 1.5,
+                       strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p2_5_SES)
+ 
+
+#Mean Age of Peak UPPS across sociodemographic factors 
+p3_5_SES <- Long_means_all_SES %>% ungroup () %>%  
+  ggplot(aes(x = mean_peak_age_UPPS, y = oLabel, fill = oLabel)) + facet_wrap(~Subscale, scales = "free")+
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  geom_point(shape = 21, size = 2.5, color = "white") +
+  labs(x = "\nAge of Peak UPPS",
+       y = "Subgroups\n") +
+             scale_x_continuous(limits = c(17, 20), breaks = seq(17, 20, by = 1))+ #Formatting best for mean UPPS
+      # scale_x_continuous(limits = c(16.90, 20), breaks = seq(17, 20, by = 1))+ #Formatting best for consistency across all subscales
+  theme(aspect.ratio = 1.5,
+                       strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p3_5_SES)
+ 
+
+ggsave(p1_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Mean_AllSubscales_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+ggsave(p2_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Peak_AllSubscales_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+ 
+ggsave(p3_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Peak_Age_AllSubscales_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+``` 
+
+# Characterize Age Changes 
+## Full Sample   
+
+```{r, echo = FALSE, fig.align='center'}
+
+subscale <- levels(Long_UPPS$oSubscale)
+
+gam.statistics <- data.frame(
+  Subscale = factor(rep(NA, length(subscale)), levels = subscale),
+  GAM.smooth_Fvalue = numeric(length(subscale)),
+  GAM.smooth.pvalue = numeric(length(subscale)),
+  smooth.change.onset = numeric(length(subscale)),
+  smooth.peak.change = numeric(length(subscale)),
+  smooth.decrease.onset = numeric(length(subscale)),
+  smooth.decrease.offset = numeric(length(subscale)),
+  smooth.increase.onset = numeric(length(subscale)),
+  smooth.increase.offset = numeric(length(subscale)),
+  smooth.last.change = numeric(length(subscale)),
+  max.age.fitted = numeric(length(subscale))
+  )
+
+gam.fittedvalues <- data.frame(Subscale = factor(), visit_age = numeric(), fitted = numeric(), fitted2 = numeric(), se = numeric(), lower_ci = numeric(), upper_ci=numeric())
+
+gam.smoothestimates <- data.frame(Subscale = factor(), visit_age = numeric(), estimate = numeric(), se = numeric())
+
+gam.derivatives <- data.frame(Subscale = factor(), visit_age = numeric(), derivative = numeric(), lower = numeric(),
+                              upper = numeric(), significant = numeric(), significant_deriv = numeric()) 
+
+gam.pred <- data.frame(Subscale = factor(), visit_age = numeric(), predicted = numeric(), se = numeric(),
+                              lower = numeric(), upper = numeric()) 
+
+for (subst in seq_along(subscale)) {
+  sub_df <- Long_UPPS[Long_UPPS$oSubscale == subscale[subst], ]  # Subset data
+  
+gam.model <- mgcv::gamm(
+  Score ~ s(visit_age, k = 4, fx = F, bs = "cs") + sex + income_recode + raceeth_recode + site,
+  random = list(subject = ~1, subject = ~0 + visit_age),  # <- combined intercept & slope
+  data = sub_df,
+  method = "REML")
+
+gam.results <- summary(gam.model$gam)
+
+df <- as.data.frame(unclass(gam.model$gam$model),stringsAsFactors = TRUE)
+np <- 200
+thisPred <- data.frame(init = rep(0,np))
+theseVars <- attr(gam.model$gam$terms, "term.labels")
+varClasses <- attr(gam.model$gam$terms,"dataClasses")
+thisResp <- as.character(gam.model$gam$terms[[2]])
+smooth_var <- "visit_age"
+for (v in c(1:length(theseVars))) {
+  thisVar <- theseVars[[v]]
+  thisClass <- varClasses[thisVar]
+  if (thisVar == smooth_var) {
+    thisPred[,smooth_var] = seq(min(df[,smooth_var],na.rm=T), max(df[,smooth_var], na.rm=T), length.out = np)
+  } else {
+      switch (thisClass,
+              "numeric" = {thisPred[,thisVar] = median(df[,thisVar])}, #make predictions based on median value
+              "character" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]}, #make predictions based on first level of char
+              "factor" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]}, #make predictions based on first level of factor 
+              "ordered" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]} #make predictions based on first level of ordinal variable
+      )
+    }
+  }
+  pred <- thisPred %>% dplyr::select(-init)
+  
+## MODEL STATSTICS ##  
+#GAM derivatives
+#Get derivatives of the smooth function using finite differences
+derv <- gratia::derivatives(gam.model, term = sprintf('s(%s)',smooth_var), data = pred, interval = "simultaneous", unconditional = F) #derivative at 200 indices of smooth_var with a simultaneous CI
+  #Identify derivative significance window(s)
+  derv <- derv %>% #add "sig" column (TRUE/FALSE) to derv
+    mutate(sig = !(0 > .lower_ci & 0 < .upper_ci)) #derivative is sig if the lower CI is not < 0 while the upper CI is > 0 (i.e., when the CI does not include 0)
+  derv$sig_deriv = derv$.derivative*derv$sig #add "sig_deriv derivatives column where non-significant derivatives are set to 0
+  mean.derivative <- mean(derv$.derivative)
+  
+  #Model summary outputs
+  #Signed F value for the smooth term and GAM-based significance of the smooth term
+  gam.smooth.F <- gam.results$s.table[1,3] #first row is s(smooth_var), third entry is F
+  gam.smooth.Rsq <- gam.results$r.sq
+  if(mean.derivative < 0){ #if the average derivative is less than 0, make the effect size estimate negative
+    gam.smooth.F <- gam.smooth.F*-1}
+  
+  gam.smooth.pvalue <- gam.results$s.table[1,4] #first row is s(smooth_var), fourth entry is p-value
+
+ #Derivative-based temporal characteristics
+  #Age of developmental change onset
+  if(sum(derv$sig) > 0){ #if derivative is significant at at least 1 age
+    change.onset <- min(derv$visit_age[derv$sig==T])} #find first age in the smooth where derivative is significant
+  if(sum(derv$sig) == 0){ #if gam derivative is never significant
+    change.onset <- NA} #assign NA
+ 
+  #Age of maximal developmental change
+  if(sum(derv$sig) > 0){ 
+    derv$abs_sig_deriv = round(abs(derv$sig_deriv),5) #absolute value significant derivatives
+    maxval <- max(derv$abs_sig_deriv) #find the largest derivative
+    window.peak.change <- derv$visit_age[derv$abs_sig_deriv == maxval] #identify the age(s) at which the derivative is greatest in absolute magnitude
+    peak.change <- mean(window.peak.change)} #identify the age of peak developmental change
+  if(sum(derv$sig) == 0){ 
+    peak.change <- NA}  
+ 
+  #Age of decrease onset
+  if(sum(derv$sig) > 0){ 
+    decreasing.range <- derv$visit_age[derv$sig_deriv < 0] #identify all ages with a significant negative derivative (i.e., smooth_var indices where y is decreasing)
+    if(length(decreasing.range) > 0)
+      decrease.onset <- min(decreasing.range) #find youngest age with a significant negative derivative
+    if(length(decreasing.range) == 0)
+      decrease.onset <- NA}
+  if(sum(derv$sig) == 0){
+    decrease.onset <- NA}  
+
+    #Age of decrease offset
+  if(sum(derv$sig) > 0){ 
+    decreasing.range <- derv$visit_age[derv$sig_deriv < 0] #identify all ages with a significant negative derivative (i.e., smooth_var indices where y is decreasing)
+    if(length(decreasing.range) > 0){
+      last.decrease <- max(decreasing.range) #find oldest age with a significant negative derivative
+      if(last.decrease == derv$visit_age[length(derv$visit_age)]) #if the last age of significant decrease is the oldest in the dataset
+        decrease.offset <- last.decrease
+      if(last.decrease != derv$visit_age[length(derv$visit_age)]){ 
+        decrease.offset.row <- which(derv$visit_age == last.decrease) + 1 #use above to find the first age when the derivative is not significant
+        decrease.offset <- derv$visit_age[decrease.offset.row]}
+    }
+    if(length(decreasing.range) == 0)
+      decrease.offset <- NA}
+  if(sum(derv$sig) == 0){ 
+    decrease.offset <- NA}  
+
+  #Age of increase onset
+  if(sum(derv$sig) > 0){ 
+    increasing.range <- derv$visit_age[derv$sig_deriv > 0] #identify all ages with a significant positive derivative (i.e., smooth_var indices where y is increasing)
+    if(length(increasing.range) > 0)
+      increase.onset <- min(increasing.range) #find oldest age with a significant positive derivative
+    if(length(increasing.range) == 0)
+      increase.onset <- NA}
+  if(sum(derv$sig) == 0){ 
+    increase.onset <- NA}  
+ 
+#Age of increase offset
+  if(sum(derv$sig) > 0){ 
+    increasing.range <- derv$visit_age[derv$sig_deriv > 0] #identify all ages with a significant positive derivative (i.e., smooth_var indices where y is increasing)
+    if(length(increasing.range) > 0){
+      last.increase <- max(increasing.range) #find oldest age with a significant positive derivative
+      if(last.increase == derv$visit_age[length(derv$visit_age)]) #if the last age of significant increase is the oldest in the dataset
+        increase.offset <- last.increase
+      if(last.increase != derv$visit_age[length(derv$visit_age)]){ 
+        increase.offset.row <- which(derv$visit_age == last.increase) + 1 #use above to find the first age when the derivative is not significant
+        increase.offset <- derv$visit_age[increase.offset.row]}
+    }
+    if(length(increasing.range) == 0)
+      increase.offset <- NA}
+  if(sum(derv$sig) == 0){ 
+    increase.offset <- NA}  
+  
+ #Age of last change
+  if(sum(derv$sig) > 0){ 
+    change.offset <- max(derv$visit_age[derv$sig==T])} #find last age in the smooth where derivative is significant
+  if(sum(derv$sig) == 0){ 
+    change.offset <- NA}  
+  
+gam.statistics$Subscale[subst] <- subscale[subst]
+gam.statistics$GAM.smooth_Fvalue[subst] <- gam.smooth.F
+gam.statistics$GAM.smooth_RSq[subst] <- gam.smooth.Rsq
+
+gam.statistics$GAM.smooth.pvalue[subst] <- gam.smooth.pvalue
+
+gam.statistics$smooth.change.onset[subst] <- change.onset
+gam.statistics$smooth.peak.change[subst] <- peak.change
+gam.statistics$smooth.decrease.onset[subst] <- decrease.onset
+gam.statistics$smooth.decrease.offset[subst] <- decrease.offset
+gam.statistics$smooth.increase.onset[subst] <- increase.onset
+gam.statistics$smooth.increase.offset[subst] <- increase.offset
+gam.statistics$smooth.last.change[subst] <- change.offset
+
+ #Generate predictions (fitted values) based on the gam model and predication data frame
+gam.fittedvalues_temp <- gratia::fitted_values(object = gam.model, data = pred)
+gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+
+maxval2 <- max(gam.fittedvalues_temp$.fitted) #find the largest derivative
+gam.statistics$max.age.fitted[subst] <- gam.fittedvalues_temp$visit_age[gam.fittedvalues_temp$.fitted == maxval2] #identify the age(s) at which the 
+gam.statistics$max.val.fitted[subst] <- maxval2
+# gam.fittedvalues_temp <- plogis(fitted(gam.model$gam))*30
+
+temp_fit <- data.frame(
+  Subscale = factor(subscale[subst]),
+  visit_age = gam.fittedvalues_temp$visit_age, 
+  fitted = gam.fittedvalues_temp$.fitted, 
+  fitted2 = gam.fittedvalues_temp$.fitted2, 
+  se = gam.fittedvalues_temp$.se, 
+  lower_ci = gam.fittedvalues_temp$.lower_ci, 
+  upper_ci = gam.fittedvalues_temp$.upper_ci)
+gam.fittedvalues <- bind_rows(gam.fittedvalues, temp_fit)
+
+gam.smoothvalues_temp <- gratia::smooth_estimates(object = gam.model, data = pred, smooth = sprintf('s(%s)',smooth_var))
+
+temp_smooth <- data.frame(
+  Subscale = factor(subscale[subst]),
+  visit_age = gam.smoothvalues_temp$visit_age, 
+  estimate = gam.smoothvalues_temp$.estimate,  
+  se = gam.smoothvalues_temp$.se)
+gam.smoothestimates <- bind_rows(gam.smoothestimates, temp_smooth)
+
+temp_deriv <- data.frame(
+  Subscale = factor(subscale[subst]),
+  visit_age = derv$visit_age, 
+  derivative = derv$.derivative, 
+  lower = derv$.lower_ci,
+  upper = derv$.upper_ci, 
+  significant = derv$sig, 
+  significant_deriv = derv$sig_deriv)
+
+gam.derivatives <- bind_rows(gam.derivatives, temp_deriv)
+
+gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+
+temp_pred <- data.frame(
+  Subscale = factor(subscale[subst]),
+  visit_age = gam.pred_temp$x,
+  predicted = gam.pred_temp$predicted, 
+  se = gam.pred_temp$std.error,
+  lower = gam.pred_temp$conf.low, 
+  upper = gam.pred_temp$conf.high)
+
+gam.pred <- bind_rows(gam.pred, temp_pred)  
+
+}
+
+
+#Calculate the average first derivative in each region at each substance
+deriv_rate <- gam.derivatives %>% group_by(Subscale) %>% do(deriv_rate = mean(.$derivative)) %>% unnest(cols = "deriv_rate")
+
+gam.statistics <- merge(gam.statistics, deriv_rate, by = "Subscale")
+
+
+gam.statistics[] <- lapply(gam.statistics, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+custom_order <- c("Mean", "Neg Urg", "Perseverance", "Pos Urg", "Premeditation", "Sensation Seeking")
+# Convert to factor with levels in custom order
+gam.statistics <- gam.statistics %>%
+  mutate(Subscale = factor(Subscale, levels = custom_order)) %>%
+  arrange(Subscale)
+
+write.csv(gam.statistics, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Smooth_Statistics_Across_UPPSSubscales_FullSample.csv', row.names = FALSE)
+ 
+
+
+```  
+
+
+### Plots:  
+
+```{r, echo = FALSE, fig.align='center'}
+
+# Age by UPPS: All Subscsales, no datapoints
+age1 <- ggplot(Long_UPPS,
+                    aes(x=visit_age, y=Score, color=oSubscale,fill=oSubscale))+
+  geom_smooth(method="gam", formula = y ~ s(x, k = 4, fx = FALSE, bs = "cs"))+
+   scale_color_manual(values=upps_colorbar)+
+   scale_fill_manual(values=upps_colorbar)+
+   theme(aspect.ratio=.5, legend.position = "none",
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+
+  labs(x = "\nAge",
+       y = "UPPS Score\n")
+print(age1)
+
+# Age by UPPS: Subscales separately, trajectories shown 
+age2 <- ggplot(Long_UPPS,
+                    aes(x=visit_age, y=Score, color=oSubscale,fill=oSubscale))+ 
+  geom_line(data= Long_UPPS,
+            aes(y=Score, x = visit_age, group=subject), alpha=.1, color = "black",
+            linewidth = .25)+ facet_wrap(~oSubscale, scales = "free")+ 
+  scale_fill_manual(values = upps_colorbar)+ 
+  scale_color_manual(values = upps_colorbar)+ 
+  geom_smooth(method="gam", formula = y ~ s(x, k = 4, fx = FALSE, bs = "cs"))+
+  theme(legend.position = "none", aspect.ratio=.5, 
+                       strip.background = element_blank(),
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+ 
+  # scale_y_continuous(limits = c(1, 4), breaks = seq(1, 4, by = 1))+
+labs(x = "\nAge",
+       y = "UPPS Score\n")
+print(age2)
+ 
+
+# Derivative plots for UPPS: Subscales separately 
+derv<- gam.derivatives[gam.derivatives$Subscale=="Mean",] 
+d1<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = upps_colorbar[1], midpoint = 0, mid = "white",
+                           high = upps_colorbar[1])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) + geom_vline(data = gam.statistics[gam.statistics$Subscale=="Mean",], aes(xintercept=smooth.decrease.offset), color="black") +
+      geom_vline(data = gam.statistics[gam.statistics$Subscale=="Mean",], aes(xintercept=smooth.decrease.onset), color="black") +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5)) +
+  xlab("\nAge") + ylab("UPPS Total\n")
+
+ 
+derv<- gam.derivatives[gam.derivatives$Subscale=="Sensation Seeking",] 
+d2<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = upps_colorbar[2], midpoint = 0, mid = "white",
+                           high = upps_colorbar[2])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) + 
+  geom_vline(data = gam.statistics[gam.statistics$Subscale=="Sensation Seeking",], aes(xintercept=smooth.decrease.offset), color="black") +
+      geom_vline(data = gam.statistics[gam.statistics$Subscale=="Sensation Seeking",], aes(xintercept=smooth.decrease.onset), color="black") +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+   xlab("\nAge") + ylab("UPPS SS\n")
+
+derv<- gam.derivatives[gam.derivatives$Subscale=="Neg Urg",] 
+d3<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = upps_colorbar[3], midpoint = 0, mid = "white",
+                           high = upps_colorbar[3])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) +   geom_vline(data = gam.statistics[gam.statistics$Subscale=="Neg Urg",], aes(xintercept=smooth.decrease.offset), color="black") +
+      geom_vline(data = gam.statistics[gam.statistics$Subscale=="Neg Urg",], aes(xintercept=smooth.decrease.onset), color="black") +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+    xlab("\nAge") + ylab("UPPS Negative Urgency\n")
+
+derv<- gam.derivatives[gam.derivatives$Subscale=="Pos Urg",] 
+d4<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = upps_colorbar[4], midpoint = 0, mid = "white",
+                           high = upps_colorbar[4])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) +   geom_vline(data = gam.statistics[gam.statistics$Subscale=="Pos Urg",], aes(xintercept=smooth.decrease.offset), color="black") +
+      geom_vline(data = gam.statistics[gam.statistics$Substance=="Pos Urg",], aes(xintercept=smooth.decrease.onset), color="black") +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+xlab("\nAge") + ylab("UPPS Positive Urgency\n")
+
+derv<- gam.derivatives[gam.derivatives$Subscale=="Perseverance",] 
+d5<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = upps_colorbar[5], midpoint = 0, mid = "white",
+                           high = upps_colorbar[5])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) +   geom_vline(data = gam.statistics[gam.statistics$Subscale=="Perseverance",], aes(xintercept=smooth.decrease.offset), color="black") +
+      geom_vline(data = gam.statistics[gam.statistics$Subscale=="Perseverance",], aes(xintercept=smooth.decrease.onset), color="black") +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+  xlab("\nAge") + ylab("UPPS Perseverance\n")
+
+derv<- gam.derivatives[gam.derivatives$Subscale=="Premeditation",] 
+d6 <- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = upps_colorbar[6], midpoint = 0, mid = "white",
+                           high = upps_colorbar[6])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) +   geom_vline(data = gam.statistics[gam.statistics$Subscale=="Premeditation",], aes(xintercept=smooth.decrease.offset), color="black") +
+      geom_vline(data = gam.statistics[gam.statistics$Subscale=="Premeditation",], aes(xintercept=smooth.decrease.onset), color="black") +
+  scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+  xlab("\nAge") + ylab("UPPS Premeditation\n")
+
+
+Derv1 <- ggarrange(d1, d2, d3, 
+                   ncol = 3, nrow = 1)
+  
+Derv2 <- ggarrange(d4, d5, d6, 
+                   ncol = 3, nrow = 1)
+ 
+
+ggsave(age1, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_AllSubscales.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+ggsave(age2, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_AllSubscales_Sep.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+ggsave(Derv1, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_Deriv1_AllSubscales_Sep.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+
+ggsave(Derv2, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_Deriv2_AllSubscales_Sep.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+gam.statistics$oSubscale <- ordered(gam.statistics$Subscale, levels = c("Mean","Pos Urg", 
+                                                                          "Neg Urg",
+                                                                          "Sensation Seeking", "Premeditation",
+                                                                         "Perseverance"))
+
+
+# Age of Peak UPPS Identified by smooth fits in GAM models
+age1_5 <- gam.statistics %>% ungroup () %>%  
+  ggplot(aes(x = max.age.fitted, y = oSubscale, fill = oSubscale)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = upps_colorbar2) +
+  labs(x = "\nAge of Peak UPPS (smooth)",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))+
+      scale_x_continuous(limits = c(11.75, 16.75), breaks = seq(12, 16, by = 2))+ 
+  theme(aspect.ratio = 1.5,
+               strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age1_5)
+
+
+age2_5 <- gam.statistics %>% ungroup () %>% 
+  ggplot(aes(x = deriv_rate, y = oSubscale, fill = oSubscale)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = upps_colorbar2) +
+  labs(x = "\nRate of Decrease",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))+
+        scale_x_continuous(trans = "reverse", limits = c(0, -.04), breaks = seq(0, -.04, by = -.02))+ 
+  theme(aspect.ratio = 1.5,
+               strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age2_5)
+
+
+
+age3_5 <- gam.statistics %>% ungroup () %>% 
+  ggplot(aes(x = smooth.last.change, y = oSubscale, fill = oSubscale)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = upps_colorbar2) +
+  labs(x = "\nAge of Maturation",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))+
+        scale_x_continuous(limits = c(21, 30), breaks = seq(22, 30, by = 4))+ 
+  theme(aspect.ratio = 1.5,
+                       strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age3_5)
+
+ 
+age4_5 <- gam.statistics %>% ungroup () %>%  
+  ggplot(aes(x = smooth.peak.change, y = oSubscale, fill = oSubscale)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = upps_colorbar2) +
+    labs(x = "\nAge of Peak Change",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))+
+          scale_x_continuous(limits = c(11.75, 30), breaks = seq(15, 30, by = 5))+ 
+  theme(aspect.ratio = 1.5,
+                               strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age4_5)
+
+ 
+age5_5 <- gam.statistics %>% ungroup () %>%  
+  ggplot(aes(x = smooth.decrease.onset, y = oSubscale, fill = oSubscale)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = upps_colorbar2) +
+      labs(x = "\nDecrease Onset (Age)",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))+
+            scale_x_continuous(limits = c(11.75, 20), breaks = seq(12, 20, by = 4))+ 
+  theme(aspect.ratio = 1.5,
+   strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age5_5)
+
+
+
+age6_5 <- gam.statistics %>% ungroup () %>%  
+  ggplot(aes(x = smooth.decrease.offset, y = oSubscale, fill = oSubscale)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = upps_colorbar2) +
+        labs(x = "\nDecrease Offset (Age)",
+       y = "Subscale\n") +
+  scale_y_discrete(
+    breaks = c("Mean", "Pos Urg", "Neg Urg", "Sensation Seeking", "Premeditation", "Perseverance"),
+    labels = c("Mean", "Pos. Urg.", "Neg. Urg.","SS.","Pre.","Pers."))+
+              scale_x_continuous(limits = c(20, 30), breaks = seq(20, 30, by = 5))+ 
+  theme(aspect.ratio = 1.5,                               
+        strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age6_5)
+
+UPPS_Plots_Age1 <- ggarrange(age1_5, age2_5, age3_5,
+                    ncol = 3, nrow = 1)
+UPPS_Plots_Age1
+ 
+
+UPPS_Plots_Age2 <- ggarrange(age4_5, age5_5, age6_5,
+                    ncol = 3, nrow = 1)
+UPPS_Plots_Age2 
+
+ggsave(UPPS_Plots_Age1, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_AllSubscales_Gam_Stats1.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(UPPS_Plots_Age2, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_AllSubscales_Gam_Stats2.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+``` 
+
+
+## Demographic Factors
+
+### All Participants (no covariates)
+```{r, echo = FALSE, fig.align='center'}
+
+set.seed(1)
+
+
+subscales <- levels(Long_UPPS$oSubscale)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over subscales & sexes
+# ----------------------------
+for (subst in subscales) {
+    
+    sub_df <- Long_UPPS %>%
+      filter(oSubscale == subst)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      Score ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.max(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      oSubscale = subst,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      oSubscale = subst, 
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      oSubscale = subst, 
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      oSubscale = subst,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      oSubscale = subst, 
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(oSubscale) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_all <- left_join(gam.statistics, deriv_rate, by = c("oSubscale"))
+gam.statistics_all$Label <- "All"
+gam.fittedvalues_all <- gam.fittedvalues
+gam.fittedvalues_all$Label <- "All"
+gam.pred_all <- gam.pred
+gam.pred_all$Label <- "All"
+gam.derivatives_all <- gam.derivatives
+gam.derivatives_all$Label <- "All"
+
+``` 
+
+###Sex 
+```{r, echo = FALSE, fig.align='center'}
+
+subscales <- levels(Long_UPPS$oSubscale)
+sexes <- levels(Long_UPPS$sex)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over subscales & sexes
+# ----------------------------
+for (subst in subscales) {
+  for (sx in sexes) {
+    
+    sub_df <- Long_UPPS %>%
+      filter(oSubscale == subst, sex == sx)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      Score ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.max(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      oSubscale = subst,
+      Label = sx,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+}
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(oSubscale, Label) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_sex <- left_join(gam.statistics, deriv_rate, by = c("oSubscale","Label"))
+gam.fittedvalues_sex <- gam.fittedvalues
+gam.pred_sex <- gam.pred
+gam.derivatives_sex <- gam.derivatives
+
+``` 
+
+###Income 
+```{r, echo = FALSE, fig.align='center'}
+
+subscales <- levels(Long_UPPS$oSubscale)
+incomes <- levels(Long_UPPS$oIncome_recode)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over subscales & incomes
+# ----------------------------
+for (subst in subscales) {
+  for (sx in incomes) {
+    
+    sub_df <- Long_UPPS %>%
+      filter(oSubscale == subst, oIncome_recode == sx)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      Score ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.max(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      oSubscale = subst,
+      Label = sx,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+}
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(oSubscale, Label) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_income <- left_join(gam.statistics, deriv_rate, by = c("oSubscale","Label"))
+gam.fittedvalues_income <- gam.fittedvalues
+gam.pred_income <- gam.pred
+gam.derivatives_income <- gam.derivatives
+
+``` 
+
+###Race 
+```{r, echo = FALSE, fig.align='center'}
+
+subscales <- levels(Long_UPPS$oSubscale)
+races <- levels(Long_UPPS$oRaceeth_recode)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over subscales & incomes
+# ----------------------------
+for (subst in subscales) {
+  for (sx in races) {
+    
+    sub_df <- Long_UPPS %>%
+      filter(oSubscale == subst, oRaceeth_recode == sx)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      Score ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.max(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      oSubscale = subst,
+      Label = sx,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+}
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(oSubscale, Label) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_raceeth <- left_join(gam.statistics, deriv_rate, by = c("oSubscale","Label"))
+gam.fittedvalues_raceeth <- gam.fittedvalues
+gam.pred_raceeth <- gam.pred
+gam.derivatives_raceeth <- gam.derivatives
+
+``` 
+
+
+### Site
+```{r, echo = FALSE, fig.align='center'}
+
+subscales <- levels(Long_UPPS$oSubscale)
+sites <- levels(Long_UPPS$site)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  oSubscale = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over subscales & incomes
+# ----------------------------
+for (subst in subscales) {
+  for (sx in sites) {
+    
+    sub_df <- Long_UPPS %>%
+      filter(oSubscale == subst, site == sx)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      Score ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.max(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      oSubscale = subst,
+      Label = sx,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      oSubscale = subst, Label = sx,
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+}
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(oSubscale, Label) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_site <- left_join(gam.statistics, deriv_rate, by = c("oSubscale","Label"))
+gam.fittedvalues_site <- gam.fittedvalues
+gam.pred_site <- gam.pred
+gam.derivatives_site <- gam.derivatives
+
+``` 
+
+
+
+#### Combine the prediction dataframes  
+```{r, echo = FALSE, fig.align='center'}
+ 
+All_UPPS_Fitted <- rbind(gam.fittedvalues_sex, gam.fittedvalues_income, 
+                           gam.fittedvalues_raceeth, gam.fittedvalues_site,
+                           gam.fittedvalues_all)
+
+All_UPPS_Pred <- rbind(gam.pred_sex, gam.pred_income, 
+                         gam.pred_raceeth, gam.pred_site, gam.pred_all)
+
+All_UPPS_Stats <- rbind(gam.statistics_sex, gam.statistics_income,
+                          gam.statistics_raceeth, gam.statistics_site, 
+                          gam.statistics_all)
+
+All_UPPS_Derivs <- rbind(gam.derivatives_sex, gam.derivatives_income,
+                          gam.derivatives_raceeth, gam.derivatives_site, 
+                          gam.derivatives_all)
+
+ 
+# All_UPPS_SES_Statistics[] <- lapply(All_UPPS_SES_Statistics, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+custom_order <- c("Mean", "Neg Urg", "Perseverance", "Pos Urg", "Premeditation","Sensation Seeking")
+# Convert to factor with levels in custom order
+All_UPPS_Stats <- All_UPPS_Stats %>%
+  mutate(oSubscale = factor(oSubscale, levels = custom_order)) %>%
+  arrange(oSubscale)
+
+write.csv(All_UPPS_Stats, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Smooth_Statistics_Across_UPPSSubscales_SES.csv', row.names = FALSE)
+
+``` 
+
+### Plots: 
+
+``` {r, echo = FALSE, fig.align='center'}
+ 
+All_UPPS_Stats$oLabel<-ordered(All_UPPS_Stats$Label,
+levels=c("E", "D", "C","B", "A", "Other","Non-Hispanic Black/AA", "Non-Hispanic White", "Hispanic", 
+         "Asian AIAN NHPI OTHER", "200k+","100k-199k","75k-99k","50k-74k", "25k-49k","<25k", 
+         "M","F","All"))
+
+All_UPPS_Pred$oLabel<-ordered(All_UPPS_Pred$Label,
+levels=c("E", "D", "C","B", "A", "Other","Non-Hispanic Black/AA", "Non-Hispanic White", "Hispanic", 
+         "Asian AIAN NHPI OTHER", "200k+","100k-199k","75k-99k","50k-74k", "25k-49k","<25k", 
+         "M","F","All"))
+
+
+
+col_scale_btc <- c("grey60","grey60","grey60","grey60","grey60","grey60",
+                   "grey60","grey60","grey60","grey60","grey60","grey60",
+                   "grey60","grey60","grey60","grey60","grey60","grey60",
+                   "#0D1C55")
+
+# Age by UPPS: All Subscales, no datapoints - across all SES factors, model predicted values 
+
+age1_ses <- ggplot(All_UPPS_Pred,
+                    aes(x=visit_age, y=predicted, color=oLabel))+
+  geom_line(linewidth = 1) + facet_wrap(~oSubscale, scales="free")+
+   scale_color_manual(values=col_scale_btc)+
+   theme(aspect.ratio=.5, legend.position = "none",
+                   strip.background = element_blank(),
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+scale_y_continuous(limits = c(1.5, 2.5), breaks = seq(1.5, 2.5, by = .5))+ #Formatted for Mean UPPS
+scale_x_continuous(limits = c(12, 30), breaks = seq(15, 30, by = 5))+  
+  labs(x = "\nAge",
+       y = "UPPS Scores\n")
+
+print(age1_ses)
+
+ 
+ggsave(age1_ses, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_AllSubscales_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+ 
+
+# Age of Peak Anti-Saccade Performance Identified by smooth fits in GAM models
+age1_5_SES <- All_UPPS_Stats %>%  
+  ggplot(aes(x = max.age.fitted, y = oLabel, fill = oLabel)) +
+  geom_point(shape = 21, size = 2.5, color = "white") +
+  facet_wrap(~oSubscale, scales = "free")+
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  labs(x = "\nAge of Peak UPPS (Smooth)",
+       y = "Subgroup\n")+
+  scale_x_continuous(limits = c(11.75, 14), breaks = seq(12, 14, by = 1))+ #Formatting best for mean UPPS
+  # scale_x_continuous(limits = c(11.75, 30), breaks = seq(12, 30, by = 4))+ #Formatting best for consistency across subscales
+  theme(aspect.ratio = 1.5,
+  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age1_5_SES)
+
+
+# Average derivative indicating rate of change (increase in this case)
+age2_5_SES <- All_UPPS_Stats %>%   
+  ggplot(aes(x = deriv_rate, y = oLabel, fill = oLabel)) +
+  geom_point(shape = 21, size = 2.5, color = "white") +
+ facet_wrap(~oSubscale, scales = "free")+
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+       labs(x = "\nRate of Decrease",
+       y = "Subgroup\n")+
+  scale_x_continuous(trans = "reverse", limits = c(0, -.04), breaks = seq(0, -.04, by = -.02))+#Formatting best for mean UPPS
+  # scale_x_continuous(trans = "reverse", limits = c(.0002, -.05), breaks = seq(0, -.05, by = -.01))+#Formatting best for consistency across subscales
+  theme(aspect.ratio = 1.5,
+        strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age2_5_SES)
+
+
+# Age of maturation indicated by last age where derivative did not contain 0 
+age3_5_SES <- All_UPPS_Stats %>% #filter(Subscale=="Mean") %>%ungroup () %>%  
+  ggplot(aes(x = smooth.last.change, y = oLabel, fill = oLabel)) +
+  geom_point(shape = 21, size = 2.5, color = "white") +
+  facet_wrap(~oSubscale, scales = "free")+
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  xlab("\nAge of Maturation") +
+  ylab("Subgroup\n") +
+    scale_x_continuous(limits = c(12, 30), breaks = seq(12, 30, by = 4))+  
+  theme(aspect.ratio = 1.5,
+          strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age3_5_SES)
+
+
+# Peak change age identified by the smooth
+age4_5_SES <- All_UPPS_Stats %>% 
+  ggplot(aes(x = smooth.peak.change, y = oLabel, fill = oLabel)) +
+  geom_point(shape = 21, size = 2.5, color = "white") +
+  facet_wrap(~oSubscale, scales = "free")+
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  xlab("\nPeak Change Age") +
+  ylab("Subgroup\n") +
+    scale_x_continuous(limits = c(12, 30), breaks = seq(12, 30, by = 4))+  
+  theme(aspect.ratio = 1.5,
+          strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age4_5_SES)
+
+
+# Age at which significant decreases (first age where derivative did not include 0) started 
+age5_5_SES <- All_UPPS_Stats %>%  
+  ggplot(aes(x = smooth.decrease.onset, y = oLabel, fill = oLabel)) +
+  geom_point(shape = 21, size = 2.5, color = "white") +
+  facet_wrap(~oSubscale, scales = "free")+
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  xlab("\nDecrease Onset (Age)") +
+  ylab("Subgroup\n") +
+    scale_x_continuous(limits = c(12, 22), breaks = seq(12, 22, by = 4))+  
+  theme(aspect.ratio = 1.5,
+          strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age5_5_SES)
+
+# Age at which significant decreases (upper age where derivative included 0) ended 
+age6_5_SES <- All_UPPS_Stats %>% 
+  ggplot(aes(x = smooth.decrease.offset, y = oLabel, fill = oLabel)) +
+  geom_point(shape = 21, size = 2.5, color = "white") +
+ facet_wrap(~oSubscale, scales = "free")+
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  labs(x = "\nDecrease Offset (Age)",
+       y = "Subgroup\n")+
+    scale_x_continuous(limits = c(12, 30), breaks = seq(12, 30, by = 4))+  
+  # scale_x_continuous(breaks = c(20, 24, 28, 30), limits = c(17, 31)) +
+  theme(aspect.ratio = 1.5,
+          strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age6_5_SES)
+
+
+ggsave(age1_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_AllSubscales_Gam_Stats_PeakPerf_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age2_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_AllSubscales_Gam_Stats_RateofDec_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age3_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_AllSubscales_Gam_Stats_MatureAge_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age4_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_AllSubscales_Gam_Stats_PeakChangeAge_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age5_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_AllSubscales_Gam_Stats_DecOnsetAge_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age6_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_Age_AllSubscales_Gam_Stats_DecOffsetAge_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+ 
+``` 
+
+# Substance Use Analyses
+## Subset DFs
+```{r, echo = FALSE, fig.align='center'}
+
+set.seed(1) #for consistency  
+### Subset DF 
+SU_Vars_UPPS <- All_Sites_subs_short %>% 
+  dplyr::select(subject, visit, sex, visit_age, site, income_recode,raceeth_recode,
+                contains("past_30"), Score, Subscale,oSubscale, contains("Usetype"), 
+                contains("Category"))  
+
+SU_Vars_UPPS$Subscale <- as.factor(SU_Vars_UPPS$Subscale)
+
+### Subset DF 
+SU_Vars_UPPS_Long <- All_Sites_All_Long %>% 
+  dplyr::select(subject, visit, sex, visit_age, site, income_recode,raceeth_recode,
+                contains("past_30"), Substance, oSubstance, contains("log_past30"),
+                Score, Subscale, oSubscale, Category, Usetype) 
+
+SU_Vars_UPPS_Long$Subscale <- as.factor(SU_Vars_UPPS_Long$Subscale)
+SU_Vars_UPPS_Long$Substance <- as.factor(SU_Vars_UPPS_Long$Substance)
+
+``` 
+
+### Continuous Variable Analysis: Substance use by UPPS 
+#### Test whether effect of UPPS (overall) varies by substance
+```{r, echo = FALSE, fig.align='center'}
+
+GMM4_int <- bam(log_past30 ~ 1 + sex  +  income_recode + raceeth_recode + site + 
+    s(visit_age, k = 4, fx = F, bs = "cs") + 
+      oSubstance + 
+      s(Score, k = 3, fx = F)+
+    s(Score, oSubstance, bs = "sz", k =3, fx = F) +      
+      s(subject, bs = "re") + s(subject, visit_age, bs = "re"), #implement random effects, 
+    data = SU_Vars_UPPS_Long %>% filter(oSubscale=="Mean" & oSubstance!="All Prob"),
+    discrete = TRUE,
+    method = "fREML")
+summary(GMM4_int)
+anova(GMM4_int)
+
+
+int_gam.model_plot <- ggpredict(GMM4_int, terms = c("Score","oSubstance"))
+plot(int_gam.model_plot)
+
+
+mm <- hypothesis_test(GMM4_int, 
+                terms = c("Score","oSubstance"), test = NULL)
+
+
+``` 
+
+#### Substance use: Test for Associations with Antisaccade Across all Trial Types and Substances  
+
+```{r, echo = FALSE, fig.align='center'}
+
+#Loop over trial types & substances to get gamm model statistics
+
+subscales <- levels(All_Sites_All_Long$oSubscale)
+substance_levels <- levels(All_Sites_All_Long$oSubstance)
+
+# Initialize output data frames
+gam.statistics <- data.frame(
+  oSubscale = factor(),
+  oSubstance = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_Rsq = numeric(),
+  GAM.smooth.pvalue = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  oSubscale = factor(),
+  oSubstance = factor(),
+  Score = numeric(), 
+  fitted = numeric(), 
+  fitted2 = numeric(), 
+  se = numeric(), 
+  lower_ci = numeric(), 
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  oSubscale = factor(),
+  oSubstance = factor(),
+  Score = numeric(), 
+  estimate = numeric(), 
+  se = numeric()
+)
+
+gam.pred <- data.frame(
+  oSubscale = factor(),
+  oSubstance = factor(),
+  Score = numeric(), 
+  predicted = numeric(), 
+  se = numeric(),
+  lower = numeric(), 
+  upper = numeric()
+)
+
+ 
+
+# Nested loop: for each cogRewType, loop over each Substance
+for (cog in subscales) {
+  for (subst in substance_levels) {
+    
+    sub_df <- All_Sites_All_Long %>%
+      filter(oSubscale == cog, oSubstance == subst)
+    
+    # if (nrow(sub_df) == 0) next  # skip if no rows
+    
+    gam.model <- mgcv::gamm(
+      log_past30 ~ s(Score, fx = F, k = 3) + 
+        sex + income_recode + raceeth_recode + site + 
+        s(visit_age, fx = F, k = 4, bs = "cs"), 
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    np <- 200
+    thisPred <- data.frame(init = rep(0, np))
+    theseVars <- attr(gam.model$gam$terms, "term.labels")
+    varClasses <- attr(gam.model$gam$terms,"dataClasses")
+    thisResp <- as.character(gam.model$gam$terms[[2]])
+    smooth_var <- "Score"
+    
+    for (v in seq_along(theseVars)) {
+      thisVar <- theseVars[[v]]
+      thisClass <- varClasses[thisVar]
+      if (thisVar == smooth_var) {
+        thisPred[,smooth_var] <- seq(min(df[,smooth_var],na.rm=T),
+                                     max(df[,smooth_var],na.rm=T),
+                                     length.out = np)
+      } else {
+        switch(thisClass,
+               "numeric" = {thisPred[,thisVar] = median(df[,thisVar], na.rm=TRUE)},
+               "character" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]},
+               "factor" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]},
+               "ordered" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]}
+        )
+      }
+    }
+    pred <- thisPred %>% dplyr::select(-init)
+    
+    ## MODEL STATISTICS ##  
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      oSubscale = factor(cog, levels = subscales),
+      oSubstance = factor(subst, levels = substance_levels),
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_Rsq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue
+    ))
+    
+    ## FITTED VALUES ##
+    gam.fittedvalues_temp <- gratia::fitted_values(object = gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    temp_fit <- data.frame(
+      oSubscale = factor(cog, levels = subscales),
+      oSubstance = factor(subst, levels = substance_levels),
+      Score = gam.fittedvalues_temp$Score, 
+      fitted = gam.fittedvalues_temp$.fitted, 
+      fitted2 = gam.fittedvalues_temp$.fitted2, 
+      se = gam.fittedvalues_temp$.se, 
+      lower_ci = gam.fittedvalues_temp$.lower_ci, 
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    )
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, temp_fit)
+    
+    ## SMOOTH ESTIMATES ##
+    gam.smoothvalues_temp <- gratia::smooth_estimates(object = gam.model, data = pred, smooth = sprintf('s(%s)', smooth_var))
+    temp_smooth <- data.frame(
+      oSubscale = factor(cog, levels = subscales),
+      oSubstance = factor(subst, levels = substance_levels),
+      Score = gam.smoothvalues_temp$Score, 
+      estimate = gam.smoothvalues_temp$.estimate,  
+      se = gam.smoothvalues_temp$.se
+    )
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, temp_smooth)
+    
+    ## GGPREDICT ##
+    gam.pred_temp <- ggpredict(gam.model, terms = c("Score"))
+    temp_pred <- data.frame(
+      oSubscale = factor(cog, levels = subscales),
+      oSubstance = factor(subst, levels = substance_levels),
+      Score = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted, 
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low, 
+      upper = gam.pred_temp$conf.high
+    )
+    gam.pred <- bind_rows(gam.pred, temp_pred)
+  }
+}
+
+
+custom_order <- c("All Prob", "Alcohol", "Binge", "Cannabis", 
+                  "Nicotine")
+
+custom_order2 <- c("Mean", "Neg Urg", "Perseverance", "Pos Urg", "Premeditation", "Sensation Seeking")
+
+
+gam.statistics <- gam.statistics %>%
+  mutate(oSubscale = factor(oSubscale, levels = custom_order2),
+         oSubstance = factor(oSubstance, levels = custom_order)) %>%
+  arrange(oSubstance,oSubscale)
+
+
+write.csv(gam.statistics, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/SU_UPPS_Statistics_Across_Subscales_FullSample.csv', row.names = FALSE)
+
+
+``` 
+
+#### Plots:
+```{r, echo = FALSE, fig.align='center'}
+
+gam.pred$oSubstance<-factor(gam.pred$oSubstance,
+levels=c("All Prob","Alcohol","Binge","Cannabis","Nicotine"))
+
+# UPPS Scores by Substance Use: All Subscales, all substances, no datapoints - model predicted values adjusting for age and relevant demographic factors 
+
+
+SU_UPPS <- ggplot(gam.pred, 
+                    aes(x=Score, y=predicted, color=oSubstance))+
+   facet_wrap(~oSubscale,scales="free")+
+    geom_smooth(method="gam", formula = y ~ s(x, k = 3, fx = FALSE, bs = "cs"), fullrange=F)+
+   scale_color_manual(values=substance_colorbar)+
+   scale_fill_manual(values=substance_colorbar)+
+     theme(aspect.ratio=.5, legend.position = "none",
+                             strip.background = element_blank(),
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+  labs(x = "\nUPPS Score",
+       y = "Substance Use (log)\n")
+print(SU_UPPS)
+
+ggsave(SU_UPPS, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_SU_Cont_AllSubscales.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+     
+
+gam.statistics$oSubstance<-factor(gam.statistics$oSubstance,
+levels=c("All Prob","Alcohol","Cannabis","Nicotine","Binge"))
+
+# Plots showing gam model F statistics for each comparison (substance)
+F1_5 <- gam.statistics %>% 
+  ggplot(aes(x = GAM.smooth_Fvalue, y = oSubstance, fill = oSubstance)) +
+  facet_wrap(~oSubscale, scales = "free")+
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = substance_colorbar2) +
+  labs(x = "\nF Statistic",
+       y = "Substance \n")+
+    scale_y_discrete(
+    breaks = c("All Prob", "Alcohol", "Cannabis", "Nicotine", "Binge"),
+    labels = c("All", "Alcohol", "Cannabis", "Nicotine", "Binge"))+
+  scale_x_continuous(limits = c(15.75, 40), breaks = seq(20, 40, by = 10))+ #Formatting best for mean UPPS
+  # scale_x_continuous(limits = c(0, 40), breaks = seq(0, 40, by = 10))+ #Formatting best for all UPPS subscales
+  theme(aspect.ratio = 1.5,
+                strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(F1_5)
+
+ggsave(F1_5, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_SU_AllSubscales_Fval.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+``` 
+
+### Frequency Category Analysis: Substance use by UPPS 
+```{r, echo = FALSE, fig.align='center'}
+  
+SU_Vars_Cat_Long <- SU_Vars_UPPS_Long %>% dplyr::select(subject, visit, sex, visit_age, site, income_recode,raceeth_recode, oSubscale, Score, Substance, Category)
+
+
+SU_Results.UPPS <- data.frame(
+  oSubscale = factor(),
+  Substance = factor(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+gam.pred.UPPS <- data.frame(
+  oSubscale = factor(),
+  Substance = factor(),
+  Drug_Category = factor(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# Loop through cogRewType × Substance
+for (s in unique(SU_Vars_Cat_Long$oSubscale)) {
+  for (sub in unique(SU_Vars_Cat_Long$Substance)) {
+    
+    # Subset data for this combo
+    sub_df <- SU_Vars_Cat_Long %>% 
+      filter(oSubscale == s, Substance == sub)
+    
+    # if (nrow(sub_df) == 0) next  # skip if no rows
+    
+    # Fit GAMM
+    model <- mgcv::gamm(
+      Score ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + Category + income_recode + 
+        raceeth_recode + sex + site,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    # Extract ANOVA results
+    aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[1, 2]
+    p_val <- aov_result$pTerms.table[1, 3]
+    
+    SU_Results.UPPS <- rbind(
+      SU_Results.UPPS,
+      data.frame(
+        oSubscale = s,
+        Substance = sub,
+        F_value = round(F_val, 2),
+        p_value = signif(p_val, 2),
+        stringsAsFactors = FALSE
+      )
+    )
+    
+    # Predictions for "Category"
+    get_preds <- ggpredict(model$gam, terms = c("Category"))
+    
+    gam.pred.UPPS <- rbind(
+      gam.pred.UPPS,
+      data.frame(
+        oSubscale = s,
+        Substance = sub,
+        Drug_Category = get_preds$x,
+        predicted = get_preds$predicted,
+        se = get_preds$std.error,
+        lower = get_preds$conf.low,
+        upper = get_preds$conf.high
+      )
+    )
+  }
+}
+
+custom_order <- c("Mean", "Neg Urg", "Perseverance", "Pos Urg", "Premeditation", "Sensation Seeking")
+
+custom_order2 <- c("Never", "Ever", "Regular")
+
+custom_order3 <- c("All Prob", "Alcohol", "Binge","Cannabis","Nicotine")
+
+# Convert to factor with levels in custom order
+SU_Results.UPPS_All <- SU_Results.UPPS %>%
+  mutate(oSubscale = factor(oSubscale, levels = custom_order)) %>%
+  mutate(Substance = factor(Substance, levels = custom_order3)) %>%
+  arrange(Substance, oSubscale)
+
+gam.pred.UPPS_All <- gam.pred.UPPS %>%
+  mutate(Drug_Category = factor(Drug_Category, levels = custom_order2),
+         oSubscale = factor(oSubscale, levels = custom_order)) %>%
+    mutate(Substance = factor(Substance, levels = custom_order3)) %>%
+  arrange(Substance, oSubscale, Drug_Category)
+
+
+write.csv(SU_Results.UPPS_All, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Main_Effects_FreqCategories_Across_UPPSSubscales.csv', row.names = FALSE)
+
+write.csv(gam.pred.UPPS_All, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Predicted_FreqCategories_Across_UPPSSubscales.csv', row.names = FALSE)
+
+
+``` 
+
+#### Plots: 
+```{r, echo = FALSE, fig.align='center'}
+  
+
+custom_order <- c("All Prob", "Alcohol", "Binge", "Cannabis", 
+                  "Nicotine")
+
+gam.pred.UPPS_All <- gam.pred.UPPS_All %>%
+  mutate(Substance = factor(Substance, levels = custom_order)) %>%
+  arrange(Substance,Drug_Category)
+
+# Plots showing UPPS by substance use category groups - model predictions adjusted for age and relevant covariates
+Freq1_5 <- gam.pred.UPPS_All %>% 
+  ggplot(aes(x = Drug_Category, y = predicted, fill = Substance)) +
+  facet_wrap(~oSubscale, scales = "free")+
+  geom_point(shape = 21, size = 2.5, color = "white",position = position_dodge(0.3)) +
+  scale_fill_manual(values = substance_colorbar) +
+  labs(x = "\nFrequency",
+       y = "UPPS Score\n")+
+    scale_y_continuous(limits = c(1.90, 2.15), breaks = seq(1.90, 2.15, by = .05))+ #Formatting best for mean UPPS
+  # scale_y_continuous(limits = c(1.5, 2.75), breaks = seq(1.5, 2.75, by = .5))+ #Formatting best for all UPPS subscales
+  theme(aspect.ratio = .5,
+        strip.background = element_blank(),
+  # legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(Freq1_5)
+
+ggsave(Freq1_5, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_SU_FreqCat_AllSubscales.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+   
+
+``` 
+
+### Usetype Category Analysis: Substance use by UPPS 
+```{r, echo = FALSE, fig.align='center'}
+  
+SU_Vars_Use_Long <- SU_Vars_UPPS_Long %>% dplyr::select(subject, visit, sex, visit_age, site, income_recode,raceeth_recode, oSubscale, Score, Substance, Usetype)
+
+
+SU_Results.UPPS <- data.frame(
+  oSubscale = factor(),
+  Substance = factor(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+gam.pred.UPPS <- data.frame(
+  oSubscale = factor(),
+  Substance = factor(),
+  Drug_Category = factor(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# Loop through cogRewType × Substance
+for (s in unique(SU_Vars_Use_Long$oSubscale)) {
+  for (sub in unique(SU_Vars_Use_Long$Substance)) {
+    
+    # Subset data for this combo
+    sub_df <- SU_Vars_Use_Long %>% 
+      filter(oSubscale == s, Substance == sub)
+    
+    # if (nrow(sub_df) == 0) next  # skip if no rows
+    
+    # Fit GAMM
+    model <- mgcv::gamm(
+      Score ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + Usetype + income_recode + 
+        raceeth_recode + sex + site,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    # Extract ANOVA results
+    aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[1, 2]
+    p_val <- aov_result$pTerms.table[1, 3]
+    
+    SU_Results.UPPS <- rbind(
+      SU_Results.UPPS,
+      data.frame(
+        oSubscale = s,
+        Substance = sub,
+        F_value = round(F_val, 2),
+        p_value = signif(p_val, 2),
+        stringsAsFactors = FALSE
+      )
+    )
+    
+    # Predictions for "Usetype"
+    get_preds <- ggpredict(model$gam, terms = c("Usetype"))
+    
+    gam.pred.UPPS <- rbind(
+      gam.pred.UPPS,
+      data.frame(
+        oSubscale = s,
+        Substance = sub,
+        Drug_Category = get_preds$x,
+        predicted = get_preds$predicted,
+        se = get_preds$std.error,
+        lower = get_preds$conf.low,
+        upper = get_preds$conf.high
+      )
+    )
+  }
+}
+
+custom_order <- c("Mean", "Neg Urg", "Perseverance", "Pos Urg", "Premeditation", "Sensation Seeking")
+
+custom_order2 <- c("no-use", "single-use", "co-use", "poly-use")
+
+custom_order3 <- c("All Prob", "Alcohol", "Binge","Cannabis","Nicotine")
+
+# Convert to factor with levels in custom order
+SU_Results_UT.UPPS_All <- SU_Results.UPPS %>%
+  mutate(oSubscale = factor(oSubscale, levels = custom_order)) %>%
+  mutate(Substance = factor(Substance, levels = custom_order3)) %>%
+  arrange(Substance, oSubscale)
+
+gam.pred_UT.UPPS_All <- gam.pred.UPPS %>%
+  mutate(Drug_Category = factor(Drug_Category, levels = custom_order2),
+         oSubscale = factor(oSubscale, levels = custom_order)) %>%
+    mutate(Substance = factor(Substance, levels = custom_order3)) %>%
+  arrange(Substance, oSubscale, Drug_Category)
+
+
+write.csv(SU_Results_UT.UPPS_All, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Main_Effects_UsetypeCategories_Across_UPPSSubscales.csv', row.names = FALSE)
+
+write.csv(gam.pred_UT.UPPS_All, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Predicted_UsetypeCategories_Across_UPPSSubscales.csv', row.names = FALSE)
+
+``` 
+
+
+
+#### Plots: 
+```{r, echo = FALSE, fig.align='center'}
+  
+
+custom_order <- c("All Prob", "Alcohol", "Binge", "Cannabis", 
+                  "Nicotine")
+
+gam.pred_UT.UPPS_All <- gam.pred_UT.UPPS_All %>%
+  mutate(Substance = factor(Substance, levels = custom_order)) %>%
+  arrange(Substance,Drug_Category)
+
+# Plots showing UPPS by substance use use-type groups - model predictions adjusted for age and relevant covariates
+Usetype1_5 <- gam.pred_UT.UPPS_All %>% 
+  ggplot(aes(x = Drug_Category, y = predicted, fill = Substance)) +
+  facet_wrap(~oSubscale, scales = "free")+
+  geom_point(shape = 21, size = 2.5, color = "white",position = position_dodge(0.3)) +
+  scale_fill_manual(values = substance_colorbar) +
+   labs(x = "\nUse-Type",
+       y = "UPPS Score\n")+
+    scale_y_continuous(limits = c(1.925, 2.15), breaks = seq(1.95, 2.15, by = .10))+ #Formatting best for mean UPPS
+  # scale_y_continuous(limits = c(1.5, 2.75), breaks = seq(1.5, 2.75, by = .5))+ #Formatting best for all UPPS subscales
+  theme(aspect.ratio = .5,
+          strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(Usetype1_5)
+
+ggsave(Usetype1_5, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/UPPS_SU_UseTypeCat_AllSubscales.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+``` 
