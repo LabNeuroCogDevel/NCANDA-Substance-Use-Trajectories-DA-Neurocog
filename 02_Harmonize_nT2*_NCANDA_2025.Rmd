@@ -1,0 +1,1305 @@
+---
+title: "NCANDA tat2 Harmonization"
+author: "Ashley Parr (adapted from Amar Ojha, owing to Dan Petrie's investigative skills)"
+date: '2024-12-09'
+output: html_document
+---
+
+#Setup
+
+```{r setup, include=FALSE}
+
+if(!is.null(dev.list())) dev.off()# Clear plots
+cat("\014") # Clear console
+rm(list=ls())# Clean workspace
+
+knitr::opts_chunk$set(echo = TRUE)
+library(pacman)
+p_load(tidyverse, ggthemes, ggpubr, devtools, remotes, mgcv, broom, glue, gamm4, parameters, hrbrthemes, rstatix, neuroCombat, cAIC4, LNCDR, interactions, sjPlot, PNWColors, ggeffects, plotrix, patchwork, ggExtra, scales)
+library(neuroCombat) ## https://github.com/Jfortin1/neuroCombat_Rpackage
+
+#Demographics (ie site, age, etc)
+NCANDA <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/NCANDA_demo_for_harmonization_y8.csv" 
+
+#Bring in iron data 
+Iron <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/ncanda_striatum_roi_extract_y8.csv" 
+
+```
+
+## Clean/Rename scanners
+
+```{r}
+
+# Call in data 
+NCANDA <- read.csv(NCANDA, colClasses = c(age_at_baseline = "NULL"))
+Iron <- read.csv(Iron, colClasses = c(input = "NULL"))
+
+# Rename stuff so it makes sense & so that DFs can be merged 
+#can try tidyr separate instead 
+colnames(Iron)[colnames(Iron)=="subj"] <- "subject"
+colnames(Iron)[colnames(Iron)=="beta"] <- "tat2_raw"
+Iron$visit <- sub(".*_", "", Iron$subject)
+Iron$subject <- gsub("_.*", "", Iron$subject)
+Iron$subject <- as.numeric(gsub("S","",Iron$subject))
+
+NCANDA <- merge(NCANDA, Iron, by = c("subject","visit"),all.y = TRUE)
+
+NCANDA <- dplyr::select(NCANDA, -mri_restingstate_age)
+NCANDA$new_date <- as.Date(NCANDA$mri_rsfmri_date, format = "%m/%d/%y")
+
+# Remove the extremeist of outliers before harmonization (playing with this)
+NCANDA$tat2_raw[NCANDA$tat2_raw > 0.02 | NCANDA$tat2_raw < 0.005] <- NA
+
+# Remove wildly long and unncessary words from scanner names. Also fix ones that are the same scanner called something different  
+# can use NCANDA %>% mutate(mri_scanner = case_when(MEDICAL)
+NCANDA$mri_scanner <- gsub("MEDICAL SYSTEMS ", "", NCANDA$mri_scanner)
+NCANDA$mri_scanner[NCANDA$mri_scanner=="Siemens Healthineers MAGNETOM Prisma Fit MRC67096"] <- "SIEMENS Prisma_fit MRC67096"
+NCANDA$mri_scanner[NCANDA$mri_scanner=="GE SIGNA UHP bia5bia5"] <- "GE SIGNA UHP bia5"
+NCANDA$mri_scanner[NCANDA$mri_scanner=="SIEMENS TrioTim"] <- "SIEMENS TrioTim MRC35139"
+NCANDA$mri_scanner[NCANDA$mri_scanner=="GE DISCOVERY MR750 MRIPSMR"] <- "GE DISCOVERY MR750 750clic"
+
+NCANDA <- NCANDA[!is.na(NCANDA$mri_scanner),]
+
+``` 
+
+# Visualize nT2* before Harmonization
+We can see from these plots that theres something of a shift in nT2*w values depending on scanner version/upgrade. This is what we'll harmonize on. 
+```{r}
+
+# Plot by date
+siteA_B <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "A" & roi=="striatum"),
+                           aes(x=new_date, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteA_B)
+ 
+ 
+siteA_B <- annotate_figure(
+  siteA_B,
+  top = text_grob("Site A", face = "bold", size = 14)
+)
+ 
+siteB_B <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "B" & roi=="striatum"),
+                           aes(x=new_date, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteB_B)
+ 
+ 
+siteB_B <- annotate_figure(
+  siteB_B,
+  top = text_grob("Site B", face = "bold", size = 14)
+)
+
+siteC_B <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "C" & roi=="striatum"),
+                           aes(x=new_date, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteC_B)
+  
+ 
+siteC_B <- annotate_figure(
+  siteC_B,
+  top = text_grob("Site C", face = "bold", size = 14)
+)
+
+siteD_B <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "D" & roi=="striatum"),
+                           aes(x=new_date, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteD_B)
+
+siteD_B <- annotate_figure(
+  siteD_B,
+  top = text_grob("Site D", face = "bold", size = 14)
+)
+
+
+siteE_B <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "E" & roi=="striatum"),
+                           aes(x=new_date, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteE_B)
+
+ 
+siteE_B <- annotate_figure(
+  siteE_B,
+  top = text_grob("Site E", face = "bold", size = 14)
+)
+
+ 
+All_Sites_Raw_Date <- ggarrange(siteA_B, siteB_B, 
+                                siteC_B, siteD_B,
+                                siteE_B, 
+                    ncol = 3, nrow = 2,
+                    align = "hv",
+                    heights = c(.5,.5),
+                    widths = c(1, 1, 1))
+
+All_Sites_Raw_Date
+
+#For the two GE ones, show by visit 
+ 
+# Plot by date
+siteA_Bv <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "A" & roi=="striatum"),
+                           aes(x=visit, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Visit")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteA_Bv)
+ 
+ 
+siteA_Bv <- annotate_figure(
+  siteA_Bv,
+  top = text_grob("Site A", face = "bold", size = 14)
+)
+ 
+siteB_Bv <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "B" & roi=="striatum"),
+                           aes(x=visit, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Visit")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteB_Bv)
+ 
+ 
+siteB_Bv <- annotate_figure(
+  siteB_Bv,
+  top = text_grob("Site B", face = "bold", size = 14)
+)
+
+siteC_Bv <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "C" & roi=="striatum"),
+                           aes(x=visit, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Visit")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteC_Bv)
+  
+ 
+siteC_Bv <- annotate_figure(
+  siteC_Bv,
+  top = text_grob("Site C", face = "bold", size = 14)
+)
+
+siteD_Bv <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "D" & roi=="striatum"),
+                           aes(x=visit, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Visit")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteD_Bv)
+
+siteD_Bv <- annotate_figure(
+  siteD_Bv,
+  top = text_grob("Site D", face = "bold", size = 14)
+)
+
+
+siteE_Bv <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "E" & roi=="striatum"),
+                           aes(x=visit, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Visit")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteE_Bv)
+
+ 
+siteE_Bv <- annotate_figure(
+  siteE_Bv,
+  top = text_grob("Site E", face = "bold", size = 14)
+)
+
+ 
+All_Sites_Raw_Visit <- ggarrange(siteA_Bv, siteB_Bv, 
+                                siteC_Bv, siteD_Bv,
+                                siteE_Bv, 
+                    ncol = 3, nrow = 2,
+                    align = "hv",
+                    heights = c(.5,.5),
+                    widths = c(1, 1, 1))
+
+All_Sites_Raw_Visit
+
+# Remove extra stuff in workspace 
+rm(list = setdiff(ls(), c("All_Sites_Raw_Date", "All_Sites_Raw_Visit", "NCANDA","Iron")))
+
+ 
+``` 
+
+
+## Clean/Rename GE 
+We can see from the above plots that for most sites, the differences in the MRI scanner/version accounts for a lot of the shift. But in the GE ones, there doesn't appear to be a clear pattern with scanner, and instead it seems to happen between visit 4 & 5. So as a (quick) fix, lets assume there was an upgrade or something that wasn't reported and lets call it 'pre' and 'post' and treat it like it was for the sake of harmonization.  
+
+```{r}
+
+# The two GE scanners have an issue, but it isn't coded as a scanner upgrade or as anything. But the shift in tissue iron data after visit 4 #another case for case when (Will )
+NCANDA$mri_scanner[NCANDA$mri_scanner == "GE DISCOVERY MR750 MR2OW1" & NCANDA$visit <=4] <- "GE DISCOVERY MR750 MR2OW1 PRE"
+NCANDA$mri_scanner[NCANDA$mri_scanner == "GE DISCOVERY MR750 MR2OW1" & NCANDA$visit >=5] <- "GE DISCOVERY MR750 MR2OW1 POST"
+
+NCANDA$mri_scanner[NCANDA$mri_scanner == "GE DISCOVERY MR750 bia5" & NCANDA$visit <=4] <- "GE DISCOVERY MR750 bia5 PRE"
+NCANDA$mri_scanner[NCANDA$mri_scanner == "GE DISCOVERY MR750 bia5" & NCANDA$visit >=5] <- "GE DISCOVERY MR750 bia5 POST"
+
+NCANDA <- NCANDA[!is.na(NCANDA$mri_scanner),]
+
+``` 
+
+# Visualize nT2* before Harmonization
+What does it look like in the GE scanners now that we've done that? 
+```{r}
+
+
+siteC_B <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "C" & roi=="striatum"),
+                           aes(x=new_date, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteC_B)
+  
+ 
+siteC_B <- annotate_figure(
+  siteC_B,
+  top = text_grob("Site C", face = "bold", size = 14)
+)
+
+
+
+siteE_B <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "E" & roi=="striatum"),
+                           aes(x=new_date, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteE_B)
+  
+ 
+siteE_B <- annotate_figure(
+  siteE_B,
+  top = text_grob("Site E", face = "bold", size = 14)
+)
+
+
+#For the two GE ones, show by visit 
+ 
+siteC_Bv <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "C" & roi=="striatum"),
+                           aes(x=visit, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Visit")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteC_Bv)
+  
+ 
+siteC_Bv <- annotate_figure(
+  siteC_Bv,
+  top = text_grob("Site C", face = "bold", size = 14)
+)
+
+
+siteE_Bv <- ggplot(data = NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "E" & roi=="striatum"),
+                           aes(x=visit, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Visit")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteE_Bv)
+
+ 
+siteE_Bv <- annotate_figure(
+  siteE_Bv,
+  top = text_grob("Site E", face = "bold", size = 14)
+)
+
+ 
+All_Sites_Raw_GE <- ggarrange(siteC_B, siteE_B, 
+                                  siteC_Bv, siteE_Bv, 
+                    ncol = 2, nrow = 2,
+                    align = "hv",
+                    heights = c(.5,.5),
+                    widths = c(1, 1, 1))
+
+
+
+# Remove extra stuff in workspace 
+rm(list = setdiff(ls(), c("All_Sites_Raw_Date", "All_Sites_Raw_Visit", "NCANDA","Iron",
+                          "All_Sites_Raw_GE")))
+
+ 
+``` 
+
+# Harmonize by scanner
+ComBat estimates scanner-specific location and scale parameters, for each feature separately, and pools information across features using empirical Bayes to improve the estimation of those parameters for small sample size studies.https://github.com/Jfortin1/neuroCombat_Rpackage
+
+```{r}
+
+# transform from long --> wide format so every session_id has its own row, every roi its own column
+ncanda_wide <- NCANDA %>% 
+  drop_na(tat2_raw, mri_scanner,visit_age) %>% 
+  pivot_wider(names_from = roi, values_from = tat2_raw)
+
+# create dummy variables for scanner (probably a shorter way to do this but theres just so many damn different versions/features) (as factor as numeric) DAN - to replace in multiple liens use option and it changes everything 
+ncanda_wide$mri_scanner <- gsub("GE DISCOVERY MR750 750clic", "1",  ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("GE DISCOVERY MR750 bia5 PRE", "2", ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("GE DISCOVERY MR750 bia6bia6", "3", ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("GE DISCOVERY MR750 click", "4", ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("GE DISCOVERY MR750 MR2OW1 PRE", "5", ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("GE DISCOVERY MR750 MROW2", "6", ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("GE SIGNA Creator click", "7",  ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("GE SIGNA UHP bia5","8",  ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("SIEMENS Prisma_fit AWP167046", "9", ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("SIEMENS Prisma_fit MRC35139", "10", ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("SIEMENS Prisma_fit MRC67096", "11", ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("SIEMENS TrioTim MRC35139", "12", ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("SIEMENS TrioTim MRC35216", "13", ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("SIEMENS TrioTim MRC35217", "14", ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("GE DISCOVERY MR750 bia5 POST", "15", ncanda_wide$mri_scanner)
+ncanda_wide$mri_scanner <- gsub("GE DISCOVERY MR750 MR2OW1 POST", "16", ncanda_wide$mri_scanner)
+
+
+# make sure the dummy variables are saved as factors
+ncanda_wide$mri_scanner <- as.factor(ncanda_wide$mri_scanner)
+
+# save the scanner variable as 'batch'
+batch <- ncanda_wide$mri_scanner
+
+# save covariates as 'mod' (either as a vector if covariate = 1 or matrix if covariates > 1)
+mod <- ncanda_wide$visit_age
+
+# remove everything except the data we want to harmonize
+ncanda_wide_combat <- ncanda_wide %>%
+  dplyr::select(putamen:pallidum)
+
+# just to make sure everything's a factor
+mod <- as.factor(mod)
+batch <- as.factor(batch)
+
+# transpose matrix
+ncanda_wide_combat_t <- ncanda_wide_combat %>% t %>% as.matrix 
+ 
+# *****run NeuroCombat*****
+data.harmonized <- neuroCombat(dat=ncanda_wide_combat_t, batch=batch, mod=mod)
+
+# pull variable of interest (i.e., harmonized tat2 values)
+ncanda_wide_combat_t_harmonized <- data.harmonized$dat.combat  
+
+# un-transpose
+ncanda_wide_combat_harmonized <- ncanda_wide_combat_t_harmonized %>% t %>% as.data.frame
+
+# bring back other stuff we care about
+ncanda_wide_combat_harmonized <- ncanda_wide_combat_harmonized %>% mutate(.,
+  subject = ncanda_wide$subject,
+  mri_scanner = ncanda_wide$mri_scanner,
+  new_date=ncanda_wide$new_date
+)
+
+
+# wide --> long
+ncanda_long_combat_harmonized_cov.age <- ncanda_wide_combat_harmonized %>% 
+  gather(., roi, tat2.combat, putamen:pallidum)
+
+# Just rename this as a check that nothing changed between last merge 
+colnames(ncanda_long_combat_harmonized_cov.age)[colnames(ncanda_long_combat_harmonized_cov.age)=="mri_scanner"] <- "new_mri_scanner"
+
+#merge back with stuff we care about 
+COMBAT_NCANDA <- merge(NCANDA, ncanda_long_combat_harmonized_cov.age, by=c("subject",
+                                                                          "roi","new_date"), 
+                       all=T)
+
+# Remove extra stuff in workspace 
+rm(list = setdiff(ls(), c("All_Sites_Raw_Date", "All_Sites_Raw_Visit", "NCANDA","Iron",
+                          "All_Sites_Raw_GE","COMBAT_NCANDA")))
+
+```
+# Harmonize by site (just to show how it does without scanner for NCANDA people)
+ComBat estimates scanner-specific location and scale parameters, for each feature separately, and pools information across features using empirical Bayes to improve the estimation of those parameters for small sample size studies.https://github.com/Jfortin1/neuroCombat_Rpackage
+
+```{r}
+
+# transform from long --> wide format so every session_id has its own row, every roi its own column
+ncanda_wide <- NCANDA %>% 
+  drop_na(tat2_raw, site,visit_age) %>% 
+  pivot_wider(names_from = roi, values_from = tat2_raw)
+
+# create dummy variables for scanner (probably a shorter way to do this but theres just so many damn different versions/features) (as factor as numeric) DAN - to replace in multiple liens use option and it changes everything 
+ncanda_wide$site <- gsub("A", "1",  ncanda_wide$site)
+ncanda_wide$site <- gsub("B", "2", ncanda_wide$site)
+ncanda_wide$site <- gsub("C", "3", ncanda_wide$site)
+ncanda_wide$site <- gsub("D", "4", ncanda_wide$site)
+ncanda_wide$site <- gsub("E", "5", ncanda_wide$site)
+
+# make sure the dummy variables are saved as factors
+ncanda_wide$site <- as.factor(ncanda_wide$site)
+
+# save the scanner variable as 'batch'
+batch <- ncanda_wide$site
+
+# save covariates as 'mod' (either as a vector if covariate = 1 or matrix if covariates > 1)
+mod <- ncanda_wide$visit_age
+
+# remove everything except the data we want to harmonize
+ncanda_wide_combat <- ncanda_wide %>%
+  dplyr::select(putamen:pallidum)
+
+# just to make sure everything's a factor
+mod <- as.factor(mod)
+batch <- as.factor(batch)
+
+# transpose matrix
+ncanda_wide_combat_t <- ncanda_wide_combat %>% t %>% as.matrix 
+ 
+# *****run NeuroCombat*****
+data.harmonized <- neuroCombat(dat=ncanda_wide_combat_t, batch=batch, mod=mod)
+
+# pull variable of interest (i.e., harmonized tat2 values)
+ncanda_wide_combat_t_harmonized <- data.harmonized$dat.combat  
+
+# un-transpose
+ncanda_wide_combat_harmonized <- ncanda_wide_combat_t_harmonized %>% t %>% as.data.frame
+
+# bring back other stuff we care about
+ncanda_wide_combat_harmonized <- ncanda_wide_combat_harmonized %>% mutate(.,
+  subject = ncanda_wide$subject,
+  site = ncanda_wide$site,
+  new_date=ncanda_wide$new_date
+)
+
+
+# wide --> long
+ncanda_long_combat_harmonized_cov.age <- ncanda_wide_combat_harmonized %>% 
+  gather(., roi, tat2.combat, putamen:pallidum)
+
+# Just rename this as a check that nothing changed between last merge 
+colnames(ncanda_long_combat_harmonized_cov.age)[colnames(ncanda_long_combat_harmonized_cov.age)=="site"] <- "new_site"
+
+colnames(ncanda_long_combat_harmonized_cov.age)[colnames(ncanda_long_combat_harmonized_cov.age)=="tat2.combat"] <- "tat2.combat.site"
+
+#merge back with stuff we care about 
+COMBAT_NCANDA <- merge(COMBAT_NCANDA, ncanda_long_combat_harmonized_cov.age, by=c("subject",
+                                                                          "roi","new_date"), 
+                       all=T)
+
+# Remove extra stuff in workspace 
+rm(list = setdiff(ls(), c("All_Sites_Raw_Date", "All_Sites_Raw_Visit", "NCANDA","Iron",
+                          "All_Sites_Raw_GE","COMBAT_NCANDA")))
+
+```
+
+# Visualize nT2* before & after Harmonization
+Lets take a look at the original plots, as well as plots of the new vs old harmonized values by age. 
+```{r}
+
+siteA_A <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "A" & roi == "striatum"), 
+                           aes(x=new_date, y=tat2.combat, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+        legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteA_A)
+ 
+siteA_B <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "A" & roi == "striatum"), 
+                           aes(x=new_date, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteA_B)
+ 
+siteA_C <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "A" & roi == "striatum"), 
+                           aes(x=tat2.combat, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) +
+    geom_smooth(method = "loess", aes(group = mri_scanner))+
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="nT2*w.raw")
+ print(siteA_C)
+ 
+ 
+Post_SiteA <- ggarrange(siteA_A, siteA_B, siteA_C,
+                    ncol = 3, nrow = 1,
+                    align = "hv",
+                    heights = c(1,1),
+                    widths = c(1, 1, 1))
+Post_SiteA
+
+Post_SiteA <- annotate_figure(
+  Post_SiteA,
+  top = text_grob("Site A", face = "bold", size = 14)
+)
+
+
+
+siteB_A <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "B" & roi == "striatum"), 
+                           aes(x=new_date, y=tat2.combat, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteB_A)
+ 
+ 
+siteB_B <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "B" & roi == "striatum"), 
+                           aes(x=new_date, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteB_B)
+ 
+siteB_C <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "B" & roi == "striatum"), 
+                           aes(x=tat2.combat, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) +
+    geom_smooth(method = "loess", aes(group = mri_scanner))+
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="nT2*w.raw")
+ print(siteB_C)
+ 
+ 
+Post_SiteB <- ggarrange(siteB_A, siteB_B, siteB_C,
+                    ncol = 3, nrow = 1,
+                    align = "hv",
+                    heights = c(1,1),
+                    widths = c(1, 1, 1))
+Post_SiteB 
+
+
+Post_SiteB <- annotate_figure(
+  Post_SiteB,
+  top = text_grob("Site B", face = "bold", size = 14)
+)
+
+
+siteC_A <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "C" & roi == "striatum"), 
+                           aes(x=new_date, y=tat2.combat, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteC_A)
+ 
+ 
+siteC_B <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "C" & roi == "striatum"), 
+                           aes(x=new_date, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteC_B)
+  
+siteC_C <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "C" & roi == "striatum"), 
+                           aes(x=tat2.combat, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+    geom_smooth(method = "loess", aes(group = mri_scanner))+
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="nT2*w.raw")
+ print(siteC_C)
+ 
+Post_SiteC <- ggarrange(siteC_A, siteC_B, siteC_C,
+                    ncol = 3, nrow = 1,
+                    align = "hv",
+                    heights = c(1,1),
+                    widths = c(1, 1, 1))
+Post_SiteC
+
+Post_SiteC <- annotate_figure(
+  Post_SiteC,
+  top = text_grob("Site C", face = "bold", size = 14)
+)
+
+
+siteD_A <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "D" & roi == "striatum"), 
+                           aes(x=new_date, y=tat2.combat, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteD_A)
+ 
+ 
+siteD_B <- ggplot(data = COMBAT_NCANDA%>% 
+                             group_by(subject) %>%
+                             filter(site == "D" & roi == "striatum"), 
+                           aes(x=new_date, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteD_B)
+ 
+siteD_C <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "D" & roi == "striatum"), 
+                           aes(x=tat2.combat, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+  geom_smooth(method = "loess", aes(group = mri_scanner))+
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+      # scale_y_continuous(trans="reverse")+
+    labs(y="nT2*w.combat", x="nT2*w.raw")
+print(siteD_C)
+ 
+ 
+Post_SiteD <- ggarrange(siteD_A, siteD_B, siteD_C,
+                    ncol = 3, nrow = 1,
+                    align = "hv",
+                    heights = c(1,1),
+                    widths = c(1, 1, 1))
+Post_SiteD
+
+Post_SiteD <- annotate_figure(
+  Post_SiteD,
+  top = text_grob("Site D", face = "bold", size = 14)
+)
+
+
+siteE_A <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "E" & roi == "striatum"), 
+                           aes(x=new_date, y=tat2.combat, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),        
+        legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteE_A)
+ 
+                                      
+siteE_B <- ggplot(data = COMBAT_NCANDA %>%
+                             group_by(subject) %>%
+                             filter(site == "E" & roi == "striatum"), 
+                           aes(x=new_date, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Date")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteE_B)
+ 
+siteE_C <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "E" & roi == "striatum"), 
+                           aes(x=tat2.combat, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+  geom_smooth(method = "loess", aes(group = mri_scanner))+
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="nT2*w.raw")
+ print(siteE_C)
+ 
+ 
+Post_SiteE <- ggarrange(siteE_A, siteE_B, siteE_C,
+                    ncol = 3, nrow = 1,
+                    align = "hv",
+                    heights = c(1,1),
+                    widths = c(1, 1, 1))
+Post_SiteE
+
+Post_SiteE <- annotate_figure(
+  Post_SiteE,
+  top = text_grob("Site E", face = "bold", size = 14)
+)
+ 
+
+# 
+# mega_fig <- ggarrange(SiteA, SiteB, 
+#                       SiteC, SiteD, SiteE,
+#                       ncol = 1, nrow = 5,
+#                       align = "hv",
+#                       heights = c(1,1),
+#                     widths = c(1, 1, 1))
+
+###BY AGE
+
+siteA_A <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "A" & roi == "striatum"), 
+                           aes(x=visit_age, y=tat2.combat, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+        legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="Age")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteA_A)
+ 
+ 
+siteA_B <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "A" & roi == "striatum"), 
+                           aes(x=visit_age, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Age")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteA_B)
+ 
+ 
+Post_SiteA_age <- ggarrange(siteA_A, siteA_B,  
+                    ncol = 2, nrow = 1,
+                    align = "hv",
+                    heights = c(1,1),
+                    widths = c(1, 1, 1))
+Post_SiteA_age
+
+Post_SiteA_age <- annotate_figure(
+  Post_SiteA_age,
+  top = text_grob("Site A", face = "bold", size = 14)
+)
+
+
+siteB_A <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "B" & roi == "striatum"), 
+                           aes(x=visit_age, y=tat2.combat, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="Age")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteB_A)
+ 
+ 
+siteB_B <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "B" & roi == "striatum"), 
+                           aes(x=visit_age, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Age")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteB_B)
+ 
+ 
+Post_SiteB_age <- ggarrange(siteB_A, siteB_B,  
+                    ncol = 2, nrow = 1,
+                    align = "hv",
+                    heights = c(1,1),
+                    widths = c(1, 1, 1))
+Post_SiteB_age
+
+Post_SiteB_age <- annotate_figure(
+  Post_SiteB_age,
+  top = text_grob("Site B", face = "bold", size = 14)
+)
+
+
+siteC_A <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "C" & roi == "striatum"), 
+                           aes(x=visit_age, y=tat2.combat, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="Age")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteC_A)
+ 
+ 
+siteC_B <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "C" & roi == "striatum"), 
+                           aes(x=visit_age, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Age")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteC_B)
+  
+Post_SiteC_age <- ggarrange(siteC_A, siteC_B, #siteA_C,
+                    ncol = 2, nrow = 1,
+                    align = "hv",
+                    heights = c(1,1),
+                    widths = c(1, 1, 1))
+Post_SiteC_age
+
+Post_SiteC_age <- annotate_figure(
+  Post_SiteC_age,
+  top = text_grob("Site C", face = "bold", size = 14)
+)
+
+
+siteD_A <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "D" & roi == "striatum"), 
+                           aes(x=visit_age, y=tat2.combat, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="Age")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteD_A)
+ 
+ 
+siteD_B <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "D" & roi == "striatum"), 
+                           aes(x=visit_age, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Age")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteD_B)
+ 
+ 
+Post_SiteD_age <- ggarrange(siteD_A, siteD_B, #siteA_C,
+                    ncol = 2, nrow = 1,
+                    align = "hv",
+                    heights = c(1,1),
+                    widths = c(1, 1, 1))
+Post_SiteD_age
+
+Post_SiteD_age <- annotate_figure(
+  Post_SiteD_age,
+  top = text_grob("Site D", face = "bold", size = 14)
+)
+
+
+siteE_A <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(site == "E" & roi == "striatum"), 
+                           aes(x=visit_age, y=tat2.combat, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),        
+        legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="Age")+
+  geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteE_A)
+ 
+siteE_B <- ggplot(data = COMBAT_NCANDA %>%
+                             group_by(subject) %>%
+                             filter(site == "E" & roi == "striatum"), 
+                           aes(x=visit_age, y=tat2_raw, color=mri_scanner)) + geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Age")+
+   geom_smooth(method = "loess", aes(group = 1),color="black")
+ print(siteE_B)
+  
+Post_SiteE_age <- ggarrange(siteE_A, siteE_B,  
+                    ncol = 2, nrow = 1,
+                    align = "hv",
+                    heights = c(1,1),
+                    widths = c(1, 1, 1))
+Post_SiteE_age
+
+Post_SiteE_age <- annotate_figure(
+  Post_SiteE_age,
+  top = text_grob("Site E", face = "bold", size = 14)
+)
+
+# 
+# mega_fig2 <- ggarrange(SiteA, SiteB, 
+#                       SiteC, SiteD, SiteE,
+#                       ncol = 1, nrow = 5,
+#                       align = "hv",
+#                       heights = c(1,1),
+#                     widths = c(1, 1, 1))
+
+#Look at age effects before & after across all sites 
+
+# 
+# ran_int_formula <- as.formula("tat2.combat ~ site + s(visit_age, fx = F)")  
+# 
+# #Factor Scores on past month assessments: 
+# iron <- mgcv::gamm(ran_int_formula,
+#              random = list(subject = ~1),
+#              data=COMBAT_NCANDA %>%
+#              filter(roi == "striatum"), 
+#              method = "REML")
+#  
+# summary(iron$gam)   
+
+#F = 396.9, p <2e-16 
+
+siteALL_A1 <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(roi == "striatum"), 
+                           aes(x=visit_age, y=tat2.combat, color=site)) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),        
+        legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="Harmonized nT2*w", x="Age")+
+  geom_smooth(method = "loess", aes(group = site))+
+    geom_smooth(method = "loess", aes(group = NA),color='black', linetype=2, se = F)
+ print(siteALL_A1)
+ 
+siteALL_A1 <- annotate_figure(
+  siteALL_A1,
+  top = text_grob("Scanner Mod: s(age): F = 396.9, p <2e-16", face = "bold", size = 10))
+# 
+# ran_int_formula <- as.formula("tat2.combat.site ~ site + s(visit_age, fx = F)")  
+# 
+# #Factor Scores on past month assessments: 
+# iron <- mgcv::gamm(ran_int_formula,
+#              random = list(subject = ~1),
+#              data=COMBAT_NCANDA %>%
+#              filter(roi == "striatum"), 
+#              method = "REML")
+#  
+# summary(iron$gam)   
+
+#F = 178.6, p <2e-16 
+
+siteALL_X1 <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(roi == "striatum"), 
+                           aes(x=visit_age, y=tat2.combat.site, color=site)) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),        
+        legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="Harmonized nT2*w", x="Age")+
+  geom_smooth(method = "loess", aes(group = site))+
+    geom_smooth(method = "loess", aes(group = NA),color='black', linetype=2, se = F)
+ print(siteALL_X1)
+ 
+siteALL_X1 <- annotate_figure(
+  siteALL_X1,
+  top = text_grob("Site: s(age): F = 178.6, p <2e-16", face = "bold", size = 10)
+)
+ 
+# 
+# ran_int_formula <- as.formula("tat2_raw ~ site + s(visit_age, fx = F)")  
+# 
+# #Factor Scores on past month assessments: 
+# iron <- mgcv::gamm(ran_int_formula,
+#              random = list(subject = ~1),
+#              data=COMBAT_NCANDA %>%
+#              filter(roi == "striatum"), 
+#              method = "REML")
+#  
+# summary(iron$gam)   
+
+#F = 142.3, p <2e-16 
+
+siteALL_B1 <- ggplot(data = COMBAT_NCANDA %>%
+                             group_by(subject) %>%
+                             filter(roi == "striatum"), 
+                           aes(x=visit_age, y=tat2_raw, color=site)) + 
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="Raw nT2*w", x="Age")+
+  geom_smooth(method = "loess", aes(group = site))+
+  geom_smooth(method = "loess", aes(group = NA),color='black', linetype=2, se = F)
+ print(siteALL_B1)
+  
+ 
+siteALL_B1 <- annotate_figure(
+  siteALL_B1,
+  top = text_grob("No Harmonization:s(age): F = 142.3, p <2e-16", face = "bold", size = 10)
+)
+ 
+
+Post_siteALL_1 <- ggarrange(siteALL_B1, siteALL_X1, siteALL_A1, 
+                    ncol = 3, nrow = 1,
+                    align = "hv",
+                    heights = c(1,1),
+                    widths = c(1, 1, 1))
+Post_siteALL_1
+
+siteALL_A <- ggplot(data = COMBAT_NCANDA %>% 
+                             group_by(subject) %>%
+                             filter(roi == "striatum"), 
+                           aes(x=visit_age, y=tat2.combat, color=site)) + #geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),        
+        legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.combat", x="Age")+
+  geom_smooth(method = "loess", aes(group = site))
+ print(siteALL_A)
+ 
+siteALL_B <- ggplot(data = COMBAT_NCANDA %>%
+                             group_by(subject) %>%
+                             filter(roi == "striatum"), 
+                           aes(x=visit_age, y=tat2_raw, color=site)) + #geom_point(alpha=.5) + 
+geom_path(aes(group=subject), alpha=0.25) +
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"),
+                legend.key.size = unit(0.25, "cm"),
+        legend.text = element_text (size = 5),
+        legend.title = element_text(size = 5))+
+    labs(y="nT2*w.raw", x="Age")+
+  geom_smooth(method = "loess", aes(group = site))
+ print(siteALL_B)
+  
+Post_siteALL_2 <- ggarrange(siteALL_A, siteALL_B,  
+                    ncol = 2, nrow = 1,
+                    align = "hv",
+                    heights = c(1,1),
+                    widths = c(1, 1, 1))
+Post_siteALL_2
+
+
+# Remove everything we don't care about 
+rm(list = setdiff(ls(), c("All_Sites_Raw_Date", "All_Sites_Raw_Visit",
+                          "All_Sites_Raw_GE","COMBAT_NCANDA","Post_SiteA","Post_SiteB",
+                          "Post_SiteC","Post_SiteD","Post_SiteE","Post_SiteA_age",
+                          "Post_SiteB_age","Post_SiteC_age","Post_SiteD_age",
+                          "Post_SiteE_age","Post_siteALL_1", "Post_siteALL_2")))
+
+```
+
+#Other
+## Clean up Iron (outliers, etc.) and residualize
+
+```{r, echo=TRUE}
+
+#merge back COMBAT with raw values 
+
+All_Sites_Iron <- COMBAT_NCANDA
+
+# List of columns to factorize
+columns_to_factorize <- c("subject", "roi","visit","site","sex","mri_scanner")
+
+# Factorize columns
+for (col in columns_to_factorize) {
+  All_Sites_Iron[[col]] <- factor(All_Sites_Iron[[col]])
+} 
+
+```   
+
+## Remove Outliers in iron
+
+```{r, echo=TRUE}
+ 
+All_Sites_Iron <- All_Sites_Iron %>% group_by(roi)%>%
+  dplyr::mutate(tat2.combat_z = zscore(tat2.combat),
+         tat2_raw_z = zscore(tat2_raw))
+
+
+hist <- ggplot(All_Sites_Iron, aes(x=tat2.combat_z,fill=roi))+geom_histogram(position="identity", col="black")+
+  scale_fill_brewer("blues", direction = -1) +
+  theme(panel.background = element_blank(), axis.line=element_line(colour="black")) +
+  guides(fill=guide_legend(title="ROI"))
+
+#RM outlier values 
+thres <- 3
+All_Sites_Iron$tat2.combat_z[abs(All_Sites_Iron$tat2.combat_z)>thres] <- NA
+All_Sites_Iron$tat2.combat[is.na(All_Sites_Iron$tat2.combat_z)] <- NA
+
+All_Sites_Iron$tat2_raw_z[abs(All_Sites_Iron$tat2_raw_z)>thres] <- NA
+All_Sites_Iron$tat2_raw[is.na(All_Sites_Iron$tat2_raw_z)] <- NA
+ 
+All_Sites_Iron <- All_Sites_Iron %>% ungroup
+
+
+```    
+
+## Save out 
+```{r, echo=TRUE}
+
+rm(list = ls()[!ls() %in% c("All_Sites_Iron")])
+
+write.csv(All_Sites_Iron, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/ALL_SITES_IRON_CLEANED_y8.csv', row.names = FALSE)
+ 
+
+```
+
