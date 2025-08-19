@@ -1,0 +1,3467 @@
+---
+title: "Age-Related Changes in Inhibitory Control and Relationships with Substance Use"
+author: Ashley C. Parr
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output: pdf_document
+---
+
+# INHIBITORY CONTROL 
+
+```{r, include=FALSE}
+
+if(!is.null(dev.list())) dev.off()# Clear plots
+cat("\014") # Clear console
+rm(list=ls())# Clean workspace
+
+library(rmarkdown)
+library(tinytex)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(LNCDR)
+library(mgcv)
+library(readr)
+library(RColorBrewer)
+library(ggpubr)
+library(plotrix)
+library(ggeffects)
+
+knitr::opts_chunk$set(out.width="50%", out.height="50%", warning = FALSE, 
+                      fig.pos = 'H', dev = 'png', dpi=150)
+
+
+library(showtext)
+font_add("Arial", "/System/Library/Fonts/Supplemental/Arial.ttf")  # Use the actual file path
+showtext_auto()
+```      
+
+# Housekeeping
+## Bring in Relevant Files, Merge, & Clean  
+```{r, echo=FALSE}
+
+All_Sites_Substance <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/ALL_SITES_SUBSTANCE_CLEANED_y8_newnicotine_08042025.RData"
+All_Sites_Substance1 <- load(All_Sites_Substance)
+
+Long_Substance <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/LONG_SUBSTANCE_y8_newnicotine_08042025.RData"
+Long_Substance1 <- load(Long_Substance)
+
+# # #Get rid of 'all' since using probabilistic score 
+Long_Substance <- Long_Substance %>% filter(Substance!="All" & Substance !="All Mean")
+# # Long_Substance <- Long_Substance %>% filter(Substance!="All Mean" & oSubstance!="All Mean")
+# # 
+Long_Substance$Substance <- droplevels(Long_Substance$Substance)
+Long_Substance$oSubstance <- droplevels(Long_Substance$oSubstance)
+# 
+
+Anti_Saccade <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/All_Anti_2023.csv"
+Anti_Saccade <- read.csv(Anti_Saccade)
+
+#Organize & Format Anti   
+
+Anti_Saccade$cogRewType<-factor(Anti_Saccade$cogRewType)
+Anti_Saccade$oCogRewType<-ordered(Anti_Saccade$cogRewType,levels=c("neu","rew"))
+
+Anti_Saccade$subject <- as.numeric(gsub("S","",Anti_Saccade$subject))
+Anti_Saccade$subject <- factor(Anti_Saccade$subject)
+Anti_Saccade$visit <- factor(Anti_Saccade$visit)
+
+#Just to get participant numbers pre-exclusions: (and age, sex, etc)
+test1 <- Anti_Saccade[!is.na(Anti_Saccade$corrat),]
+Demo_Varsx <- All_Sites_Substance %>% dplyr::select(subject, visit, sex, visit_age, site,
+                                                    income_recode,raceeth_recode)  
+test1 <- merge(test1, Demo_Varsx, by = c("subject","visit"),
+                        all.x=TRUE)
+test1 <- dplyr::select(test1, subject, visit, sex, visit_age)
+test1 <- unique(test1)
+test1 <- test1[!is.na(test1$sex),]
+
+
+Anti_Saccade$corrat[Anti_Saccade$corrat==0] <- NA
+Anti_Saccade$corlat[Anti_Saccade$corrat==0] <- NA
+Anti_Saccade$corsd[Anti_Saccade$corrat==0] <- NA
+
+#Convert AS to % instead
+Anti_Saccade$corrat <- Anti_Saccade$corrat*100
+
+#Stick a threshold on that they have to have greater than 25 viable trials 
+Anti_Saccade <- Anti_Saccade %>% filter(total_combo_trackcor>25 & corrat>40)
+Anti_Saccade <- Anti_Saccade[!is.na(Anti_Saccade$cogRewType),]
+#NEW May 13 2025
+Anti_Saccade <- dplyr::select(Anti_Saccade, subject, visit, cogRewType, oCogRewType, corrat)
+
+#Make a mean across trial types for further analyses 
+Anti_Saccade <- Anti_Saccade %>%
+  group_by(subject, visit) %>%
+  filter(cogRewType %in% c("rew", "neu")) %>%
+  dplyr::summarise(
+    corrat = mean(corrat, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(cogRewType = "main",
+         oCogRewType = "main") %>%
+  bind_rows(Anti_Saccade)
+
+
+Demo_Vars <- All_Sites_Substance %>% dplyr::select(subject, visit, sex, visit_age, site,
+                                                    income_recode,raceeth_recode)  
+
+
+Anti_Saccade <- merge(Anti_Saccade, Demo_Vars, by = c("subject","visit"),
+                        all.x=TRUE)
+
+#Get participant numbers following exclusions
+
+#Just to get participant numbers post-exclusions: (and age, sex, etc)
+test2 <- Anti_Saccade[!is.na(Anti_Saccade$corrat),]
+
+test2 <- dplyr::select(test2, subject, visit, sex, visit_age)
+test2 <- unique(test2)
+test2 <- test2[!is.na(test2$sex),]
+ 
+Anti_Saccade <- Anti_Saccade[!is.na(Anti_Saccade$cogRewType),]
+
+Anti_Substance <- merge(Anti_Saccade, All_Sites_Substance, by = c("subject", "visit",
+                                                                  "sex", "visit_age",
+                                                                  "site", 
+                                                                  "income_recode",
+                                                                  "raceeth_recode"))
+ 
+Anti_Substance_Long <- merge(Anti_Saccade, Long_Substance, by = c("subject", "visit",
+                                                                  "sex", "visit_age",
+                                                                  "site", 
+                                                                  "income_recode",
+                                                                  "raceeth_recode"))
+```   
+
+
+## Calculate Summary Stats: Mean, Peak ages, Peak Antisaccade, ETC. Across full sample & Demographic Factors 
+```{r, echo=FALSE, fig.align = "center"}
+ 
+Anti_Substance <- Anti_Substance %>%
+  group_by(subject, cogRewType) %>%
+    dplyr::mutate(
+    valid_scores = !is.na(corrat),
+    peak_age_AS = if(any(valid_scores)) visit_age[which.max(ifelse(valid_scores, corrat, -Inf))] else NA_real_,
+    peak_AS = if(any(valid_scores)) max(corrat, na.rm = TRUE) else NA_real_  # Changed this line!
+  ) %>% 
+  dplyr::select(-valid_scores)
+
+
+subscale_summary <- Anti_Substance %>%
+  group_by(cogRewType) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_AS = mean(corrat[cogRewType == cur_group()$cogRewType], na.rm = TRUE),
+    sd_AS = std.error(corrat[cogRewType == cur_group()$cogRewType], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_AS = mean(peak_AS, na.rm = TRUE),
+    sd_peak_AS = std.error(peak_AS, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_AS = mean(peak_age_AS, na.rm = TRUE),
+    SD_peak_age_AS = std.error(peak_age_AS, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_AS)),
+    .groups = "drop"
+  )
+  
+
+custom_order <- c("main", "rew", "neu")
+
+# Convert to factor with levels in custom order
+subscale_summary <- subscale_summary %>%
+  mutate(cogRewType = factor(cogRewType, levels = custom_order)) %>%
+  arrange(cogRewType)
+
+# subscale_summary[] <- lapply(subscale_summary, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+write.csv(subscale_summary, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Summary_Table_Across_ASTrialtypes_FullSample.csv', row.names = FALSE)
+
+subscale_summary_sex <- Anti_Substance %>%
+  group_by(cogRewType, sex) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_AS = mean(corrat[cogRewType == cur_group()$cogRewType], na.rm = TRUE),
+    sd_AS = std.error(corrat[cogRewType == cur_group()$cogRewType], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_AS = mean(peak_AS, na.rm = TRUE),
+    sd_peak_AS = std.error(peak_AS, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_AS = mean(peak_age_AS, na.rm = TRUE),
+    SD_peak_age_AS = std.error(peak_age_AS, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_AS)),
+    .groups = "drop"
+  )
+  
+subscale_summary_income <- Anti_Substance %>%
+  group_by(cogRewType, oIncome_recode) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_AS = mean(corrat[cogRewType == cur_group()$cogRewType], na.rm = TRUE),
+    sd_AS = std.error(corrat[cogRewType == cur_group()$cogRewType], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_AS = mean(peak_AS, na.rm = TRUE),
+    sd_peak_AS = std.error(peak_AS, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_AS = mean(peak_age_AS, na.rm = TRUE),
+    SD_peak_age_AS = std.error(peak_age_AS, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_AS)),
+    .groups = "drop"
+  )
+
+
+subscale_summary_race <- Anti_Substance %>%
+  group_by(cogRewType, oRaceeth_recode) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_AS = mean(corrat[cogRewType == cur_group()$cogRewType], na.rm = TRUE),
+    sd_AS = std.error(corrat[cogRewType == cur_group()$cogRewType], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_AS = mean(peak_AS, na.rm = TRUE),
+    sd_peak_AS = std.error(peak_AS, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_AS = mean(peak_age_AS, na.rm = TRUE),
+    SD_peak_age_AS = std.error(peak_age_AS, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_AS)),
+    .groups = "drop"
+  )
+
+
+
+subscale_summary_site <- Anti_Substance %>%
+  group_by(cogRewType, site) %>%
+  reframe(
+    # Mean and SD of all scores for this subscale
+    mean_AS = mean(corrat[cogRewType == cur_group()$cogRewType], na.rm = TRUE),
+    sd_AS = std.error(corrat[cogRewType == cur_group()$cogRewType], na.rm = TRUE),
+    # Mean of peak scores across subjects
+    mean_peak_AS = mean(peak_AS, na.rm = TRUE),
+    sd_peak_AS = std.error(peak_AS, na.rm = TRUE),
+    # Mean age at which peak occurs
+    mean_peak_age_AS = mean(peak_age_AS, na.rm = TRUE),
+    SD_peak_age_AS = std.error(peak_age_AS, na.rm = TRUE),
+    # Additional useful stats
+    n_subjects = n_distinct(subject),
+    n_valid_peaks = sum(!is.na(peak_AS)),
+    .groups = "drop"
+  )
+
+
+
+subscale_summary_sex <- subscale_summary_sex %>%
+  dplyr::rename(Label = sex)
+subscale_summary_income <- subscale_summary_income %>%
+  dplyr::rename(Label = oIncome_recode)
+subscale_summary_race <- subscale_summary_race %>%
+  dplyr::rename(Label = oRaceeth_recode)
+subscale_summary_site <- subscale_summary_site %>%
+  dplyr::rename(Label = site)
+subscale_summary$Label <- "All"
+
+Long_means_all_SES <- rbind(subscale_summary_sex, subscale_summary_income, 
+                            subscale_summary_race, subscale_summary_site,subscale_summary)
+
+
+ 
+# Long_means_all_SES[] <- lapply(Long_means_all_SES, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+
+custom_order <- c("main", "rew", "neu")
+
+# Convert to factor with levels in custom order
+Long_means_all_SES <- Long_means_all_SES %>%
+  mutate(cogRewType = factor(cogRewType, levels = custom_order)) %>%
+  arrange(cogRewType)
+
+
+write.csv(Long_means_all_SES, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Summary_Table_Across_ASTrialtypes_SES.csv', row.names = FALSE)
+
+``` 
+
+# Clean Environment 
+```{r, echo = FALSE, fig.align='center'}
+
+rm(list=ls()[! ls() %in% c("All_Sites_Substance","Anti_Substance_Long", 
+                           "Anti_Saccade", "Anti_Substance",
+                           "Long_AS_means","Long_AS_means_sex","Long_AS_means_income","Long_AS_means_race", 
+                           "Long_AS_means_site", "Long_AS_grmeans", "peakdens.peak_age", "Long_AS_peak_means_sex",
+                           "Long_AS_peak_means_income","Long_AS_peak_means_race","Long_AS_peak_means_site", 
+                           "Long_peak_means_all_SES","Long_means_all_SES","Demo_All_violin","subscale_summary")])
+
+
+``` 
+
+## Set colors  
+```{r, echo = FALSE, fig.align='center'}
+
+ 
+substance_colorbar <- c("#260C51", "#EA464C", "#7B02A8", "#079287", "#EAB720")
+substance_colorbar2 <- c("#260C51", "#EA464C", "#079287", "#EAB720", "#7B02A8")
+ 
+anti_colorbar = c("#12250E","#316427","#87C27E") 
+anti_colorbar2 = c("#12250E","#316427","#87C27E")  
+
+
+library(scales)
+Demo_Colors <- colorRampPalette(c("#F5F5F9","#12250E"))(length(unique(Long_means_all_SES$Label)))
+
+``` 
+
+## Subset DFs
+```{r, echo = FALSE, fig.align='center'}
+
+set.seed(1) #for consistency in derivatives + derivative credible intervals
+
+### Subset DF 
+Anti_Saccade <- Anti_Substance %>% dplyr::select(subject, visit, sex, visit_age, site,
+                                               oIncome_recode,oRaceeth_recode, 
+                                               cogRewType, oCogRewType, corrat) 
+Anti_Saccade$site <- droplevels(Anti_Saccade$site)
+Anti_Saccade$oCogRewType <- as.factor(Anti_Saccade$oCogRewType)
+
+``` 
+
+# Test for Differences in Antisaccade Magnitude/Mean/Peak across Trial Types and Demographic Factors 
+## Full Sample 
+```{r, echo = FALSE, fig.align='center'}
+
+# Across Trial Types  
+gam.model_AS <- mgcv::gamm(
+  corrat ~ s(visit_age, k = 4, fx = F, bs = "cs") + oCogRewType + sex + oIncome_recode + oRaceeth_recode + site,
+  random = list(subject = ~1, subject = ~0 + visit_age),  # <- combined intercept & slope
+  data = Anti_Saccade %>% 
+    filter(oCogRewType != "main"),
+  method = "REML")
+summary(gam.model_AS$gam)
+anova(gam.model_AS$gam)  
+
+``` 
+
+### Plots: 
+```{r, echo = FALSE, fig.align='center'}
+  
+# Violin plot showing distribution + Mean 
+AS_Violin <- Anti_Substance %>%
+  ggplot( aes(y=oCogRewType, x=corrat, fill=oCogRewType, color=oCogRewType)) +
+  scale_color_manual(values=anti_colorbar)+ 
+   scale_fill_manual(values=anti_colorbar)+ 
+    geom_violin(width=.5, size=0.2,adjust = 2) +
+      stat_summary(fun = mean, geom = "point", shape = 15, size = 3, color = "black") +   
+    theme(aspect.ratio=1.5, legend.position = "none",
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+    labs(x = "\nPerformance (% Correct)",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))
+print(AS_Violin)
+
+# Density plot showing distributions of peak ages 
+peakdens.peak_age = dplyr::select(Anti_Substance[!is.na(Anti_Substance$peak_age_AS),],
+                             cogRewType, peak_age_AS) %>%
+                               group_by(cogRewType) %>%
+                               summarise(Max_Dense = density(peak_age_AS)$x[which.max(density(peak_age_AS, na.rm=T)$y)])
+
+ 
+AS_dense_peak <- ggplot(Anti_Substance, aes(x = peak_age_AS, group = cogRewType, colour = cogRewType)) +
+  scale_color_manual(values=anti_colorbar)+
+  geom_density(linewidth = 1, bw = .80) + 
+   theme(aspect.ratio=1.5, legend.position = "none",
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+    scale_x_continuous(limits = c(10, 30), breaks = seq(10, 30, by = 10))+
+    # geom_vline(data = peakdens.peak_age, aes(xintercept=Max_Dense,color = cogRewType), linetype="dashed") +
+  labs(x = "\nAge of Peak Performance",
+       y = "Density\n")
+print(AS_dense_peak)
+
+
+AS_Dists <- ggarrange(AS_Violin, AS_dense_peak, 
+                    ncol = 3, nrow = 1)
+AS_Dists
+
+ggsave(AS_Dists, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Distributions_AllTrials.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+subscale_summary$oCogRewType<-ordered(subscale_summary$cogRewType,
+levels=c("main", "neu", "rew"))
+
+  
+#Mean Anti-Saccade Performance
+p1_5 <- subscale_summary %>% ungroup () %>%  
+  ggplot(aes(x = mean_AS, y = oCogRewType, fill = oCogRewType)) +  
+  geom_point(shape = 21, size = 5.5, color = "white") +
+      scale_x_continuous(limits = c(79.5, 84.5), breaks = seq(80, 84, by = 1))+ 
+  scale_fill_manual(values = anti_colorbar) +
+   labs(x = "\nPerformance (% Correct)",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p1_5)
+ 
+  
+#Mean Peak Anti-Saccade Performance
+p2_5 <- subscale_summary %>% ungroup () %>%  
+  ggplot(aes(x = mean_peak_AS, y = oCogRewType, fill = oCogRewType)) +  
+  geom_point(shape = 21, size = 5.5, color = "white") +
+      scale_x_continuous(limits = c(86.5, 91), breaks = seq(87, 91, by = 1))+ 
+  scale_fill_manual(values = anti_colorbar) +
+   labs(x = "\nPeak Performance",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p2_5)
+
+#Mean Age of Peak Anti-Saccade Performance
+p3_5 <- subscale_summary %>% ungroup () %>%  
+  ggplot(aes(x = mean_peak_age_AS, y = oCogRewType, fill = oCogRewType)) +  
+  geom_point(shape = 21, size = 5.5, color = "white") +
+      scale_x_continuous(limits = c(17.75, 18.25), breaks = seq(17.75, 18.25, by = .25))+ 
+  scale_fill_manual(values = anti_colorbar) +
+   labs(x = "\nAge of Peak Performance",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p3_5)
+
+
+
+AS_Summ <- ggarrange(p1_5, p2_5, p3_5, 
+                    ncol = 3, nrow = 1)
+AS_Summ
+
+ggsave(AS_Summ, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_MeanPeakPAge_AllTrials.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+
+#Mean & SE Anti-Saccade Performance
+p1_5_SE <- ggplot(subscale_summary, aes(mean_AS, oCogRewType)) +
+  geom_pointrange(
+    aes(xmin = mean_AS-sd_AS, xmax = mean_AS+sd_AS, color = oCogRewType),
+    position = position_dodge(0.3))+ 
+    geom_point(shape = 21, size = 5.5, color = NA) +
+    # scale_x_continuous(breaks = c(79, 80, 81, 82, 83, 84,85), limits = c(79, 85)) +
+  scale_color_manual(values = anti_colorbar) +
+  scale_fill_manual(values = anti_colorbar) +
+  labs(x = "\nPerformance (% Correct)",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))+
+   theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p1_5_SE)
+ 
+  
+#Mean & SE Peak Anti-Saccade Performance
+p2_5_SE <- ggplot(subscale_summary, aes(mean_peak_AS, oCogRewType)) +
+  geom_pointrange(
+    aes(xmin = mean_peak_AS-sd_peak_AS, xmax = mean_peak_AS+sd_peak_AS, color = oCogRewType),
+    position = position_dodge(0.3))+ 
+      geom_point(shape = 21, size = 5.5, color = NA) +
+    scale_x_continuous(breaks = c(87, 88, 89, 90,91), limits = c(87,91)) +
+  scale_color_manual(values = anti_colorbar) +
+  scale_fill_manual(values = anti_colorbar) +
+  labs(x = "\nPeak Performance",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p2_5_SE)
+
+
+#Mean & SE Age of Peak Anti-Saccade Performance
+p3_5_SE <- ggplot(subscale_summary, aes(mean_peak_age_AS, oCogRewType)) +
+  geom_pointrange(
+    aes(xmin = mean_peak_age_AS-SD_peak_age_AS, xmax = mean_peak_age_AS+SD_peak_age_AS, color = oCogRewType),
+    position = position_dodge(0.3))+ 
+    geom_point(shape = 21, size = 5.5, color = NA) +
+    scale_x_continuous(limits = c(17.5,18.5), breaks = seq(17.5, 18.5, by = .5))+ #Formatting best for mean UPPS
+  scale_fill_manual(values = anti_colorbar) +
+  scale_color_manual(values = anti_colorbar) +
+   labs(x = "\nAge of Peak Performance",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))+
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p3_5_SE)
+
+AS_Summ_SE <- ggarrange(p1_5_SE, p2_5_SE, p3_5_SE, 
+                    ncol = 3, nrow = 1)
+AS_Summ_SE
+
+ggsave(AS_Summ_SE, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_MeanPeakPAge_SE_AllTrials.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+``` 
+
+## Demographic Factors  
+```{r, echo = FALSE, fig.align='center'}
+
+# Initialize empty results data frame
+AS_Results.sex <- data.frame(
+  oCogRewType = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(Anti_Saccade$oCogRewType)) {
+  
+  # Subset data for the current substance
+  sub_df <- Anti_Saccade %>% filter(oCogRewType == s)
+  # Try fitting the model
+  model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + sex,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    AS_Results.sex <- rbind(AS_Results.sex, data.frame(
+      oCogRewType = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+AS_Results.sex$Label <- "Sex"
+
+
+# Initialize empty results data frame
+AS_Results.income <- data.frame(
+  oCogRewType = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(Anti_Saccade$oCogRewType)) {
+  
+  # Subset data for the current substance
+  sub_df <- Anti_Saccade %>% filter(oCogRewType == s)
+  # Try fitting the model
+  model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + oIncome_recode,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    AS_Results.income <- rbind(AS_Results.income, data.frame(
+      oCogRewType = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+AS_Results.income$Label <- "Income"
+
+
+# Initialize empty results data frame
+AS_Results.raceeth <- data.frame(
+  oCogRewType = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(Anti_Saccade$oCogRewType)) {
+  
+  # Subset data for the current substance
+  sub_df <- Anti_Saccade %>% filter(oCogRewType == s)
+  # Try fitting the model
+  model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + oRaceeth_recode,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    AS_Results.raceeth <- rbind(AS_Results.raceeth, data.frame(
+      oCogRewType = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+AS_Results.raceeth$Label <- "Race/Eth"
+
+
+
+# Initialize empty results data frame
+AS_Results.site <- data.frame(
+  oCogRewType = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(Anti_Saccade$oCogRewType)) {
+  
+  # Subset data for the current substance
+  sub_df <- Anti_Saccade %>% filter(oCogRewType == s)
+  # Try fitting the model
+  model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + site,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    AS_Results.site <- rbind(AS_Results.site, data.frame(
+      oCogRewType = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+AS_Results.site$Label <- "Site"
+
+#Peak UPPS
+
+unique_peak_df <- dplyr::select(Anti_Substance, subject, sex, oIncome_recode, oRaceeth_recode, site, peak_AS, peak_age_AS,oCogRewType) 
+unique_peak_df <- unique(unique_peak_df)
+
+
+# Across Subscales 
+gam.model_peakAS <- mgcv::gam(
+  peak_AS ~ oCogRewType + sex + oIncome_recode + oRaceeth_recode + site,
+  data = unique_peak_df %>% 
+    filter(oCogRewType != "main"),
+  method = "REML")
+summary(gam.model_peakAS)
+anova(gam.model_peakAS)  
+  
+# Initialize empty results data frame
+AS_Peak_Results.sex <- data.frame(
+  oCogRewType = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubscale
+for (s in unique(unique_peak_df$oCogRewType)) {
+  
+  # Subset data for the current substance
+  sub_df <- unique_peak_df %>% filter(oCogRewType == s)
+  # Try fitting the model
+  model <- mgcv::gam(
+      peak_AS ~ sex,
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    AS_Peak_Results.sex <- rbind(AS_Peak_Results.sex, data.frame(
+      oCogRewType = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+AS_Peak_Results.sex$Label <- "Sex"
+
+
+
+# Initialize empty results data frame
+AS_Peak_Results.income <- data.frame(
+  oCogRewType = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubscale
+for (s in unique(unique_peak_df$oCogRewType)) {
+  
+  # Subset data for the current substance
+  sub_df <- unique_peak_df %>% filter(oCogRewType == s)
+  # Try fitting the model
+  model <- mgcv::gam(
+      peak_AS ~ oIncome_recode,
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    AS_Peak_Results.income <- rbind(AS_Peak_Results.income, data.frame(
+      oCogRewType = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+AS_Peak_Results.income$Label <- "Income"
+
+
+# Initialize empty results data frame
+AS_Peak_Results.raceeth <- data.frame(
+  oCogRewType = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubstance
+for (s in unique(unique_peak_df$oCogRewType)) {
+  
+  # Subset data for the current substance
+  sub_df <- unique_peak_df %>% filter(oCogRewType == s)
+  # Try fitting the model
+  model <- mgcv::gam(
+      peak_AS ~ oRaceeth_recode,
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    AS_Peak_Results.raceeth <- rbind(AS_Peak_Results.raceeth, data.frame(
+      oCogRewType = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+AS_Peak_Results.raceeth$Label <- "Race/Eth"
+
+
+# Initialize empty results data frame
+AS_Peak_Results.site <- data.frame(
+  oCogRewType = character(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each level of oSubscale
+for (s in unique(unique_peak_df$oCogRewType)) {
+  
+  # Subset data for the current substance
+  sub_df <- unique_peak_df %>% filter(oCogRewType == s)
+  # Try fitting the model
+  model <- mgcv::gam(
+      peak_AS ~ site,
+      data = sub_df,
+      method = "REML")
+  
+  # Run ANOVA on the GAM component
+  aov_result <- anova(model)
+    F_val <- aov_result$pTerms.table[2]
+    p_val <- aov_result$pTerms.table[3]
+    
+    # Append to results
+    AS_Peak_Results.site <- rbind(AS_Peak_Results.site, data.frame(
+      oCogRewType = s,
+      F_value = round(F_val, 2),
+      p_value = signif(p_val, 2)
+    ))
+  }
+
+
+AS_Peak_Results.site$Label <- "Site"
+
+
+#Combine models for data tables 
+Main_Eff_Demo_Mean <- rbind(AS_Results.sex, AS_Results.income, AS_Results.raceeth, AS_Results.site)
+
+custom_order <- c("main", "rew", "neu")
+
+# Convert to factor with levels in custom order
+Main_Eff_Demo_Mean <- Main_Eff_Demo_Mean %>%
+  mutate(oCogRewType = factor(oCogRewType, levels = custom_order)) %>%
+  arrange(oCogRewType)
+
+#Combine models for data tables 
+Main_Eff_Demo_Peak <- rbind(AS_Peak_Results.sex, AS_Peak_Results.income, AS_Peak_Results.raceeth, AS_Peak_Results.site)
+
+Main_Eff_Demo_Peak <- Main_Eff_Demo_Peak %>%
+  mutate(oCogRewType = factor(oCogRewType, levels = custom_order)) %>%
+  arrange(oCogRewType)
+
+# Main_Eff_Demo_Mean[] <- lapply(Main_Eff_Demo_Mean, function(x) if (is.numeric(x)) round(x, 2) else x)
+# Main_Eff_Demo_Peak[] <- lapply(Main_Eff_Demo_Peak, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+write.csv(Main_Eff_Demo_Mean, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Main_Effects_SociodemographicFacs_Across_ASTrialTypes.csv', row.names = FALSE)
+
+write.csv(Main_Eff_Demo_Peak, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Peak_Main_Effects_SociodemographicFacs_Across_ASTrialTypes.csv', row.names = FALSE)
+
+
+``` 
+
+### Plots: 
+```{r, echo = FALSE, fig.align='center'}
+  
+#Order the demographic factors accordingly 
+Long_means_all_SES$oLabel<-ordered(Long_means_all_SES$Label,
+levels=c("E", "D", "C","B", "A", "Other","Non-Hispanic Black/AA", "Non-Hispanic White", "Hispanic", 
+         "Asian AIAN NHPI OTHER", "200k+","100k-199k","75k-99k","50k-74k", "25k-49k","<25k", 
+         "M","F","All"))
+
+  
+#Mean Anti-Saccade Performance across sociodemographic factors 
+p1_5_SES <- Long_means_all_SES %>% ungroup () %>% 
+  ggplot(aes(x = mean_AS, y = oLabel, fill = oLabel)) + facet_wrap(~cogRewType, scales = "free")+
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  geom_point(shape = 21, size = 2.5, color = "white") +
+  labs(x = "\nPerformance (% Correct)",
+       y = "Subgroup\n") +
+      scale_x_continuous(limits = c(70, 100), breaks = seq(70, 100, by = 10))+ 
+  theme(aspect.ratio = 1.5,
+  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p1_5_SES)
+ 
+
+#Mean Peak Anti-Saccade Performance across sociodemographic factors 
+p2_5_SES <- Long_means_all_SES %>% ungroup () %>% 
+  ggplot(aes(x = mean_peak_AS, y = oLabel, fill = oLabel)) + facet_wrap(~cogRewType, scales = "free")+
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  geom_point(shape = 21, size = 2.5, color = "white") +
+  labs(x = "\nPeak Performance",
+       y = "Subgroup\n") +
+        scale_x_continuous(limits = c(80, 100), breaks = seq(80, 100, by = 10))+  
+  theme(aspect.ratio = 1.5,
+        strip.background = element_blank(),
+        legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p2_5_SES)
+ 
+#Mean Age of Peak Anti-Saccade Performance across sociodemographic factors 
+p3_5_SES <- Long_means_all_SES %>% ungroup () %>% 
+  ggplot(aes(x = mean_peak_age_AS, y = oLabel, fill = oLabel)) + facet_wrap(~cogRewType, scales = "free")+
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+  geom_point(shape = 21, size = 2.5, color = "white") +
+  labs(x = "\nAge of Peak Performance",
+       y = "Subgroups\n") +
+      scale_x_continuous(limits = c(16.5, 19), breaks = seq(16.5, 19, by = .5))+
+  theme(aspect.ratio = 1.5,       
+        strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(p3_5_SES)
+
+
+ggsave(p1_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Mean_AllTrials_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+ggsave(p2_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Peak_AllTrials_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+ 
+ggsave(p3_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Peak_Age_AllTrials_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+``` 
+
+# Characterize Age Changes
+## Full Sample
+
+```{r, echo = FALSE, fig.align='center'}
+#including covariates (unlike below model for comparison with sociodemo factors)
+
+cogRewTypes <- levels(Anti_Saccade$oCogRewType)
+
+gam.statistics <- data.frame(
+  CogRewType = factor(rep(NA, length(cogRewTypes)), levels = cogRewTypes),
+  GAM.smooth_Fvalue = numeric(length(cogRewTypes)),
+  GAM.smooth.pvalue = numeric(length(cogRewTypes)),
+  smooth.change.onset = numeric(length(cogRewTypes)),
+  smooth.peak.change = numeric(length(cogRewTypes)),
+  smooth.decrease.onset = numeric(length(cogRewTypes)),
+  smooth.decrease.offset = numeric(length(cogRewTypes)),
+  smooth.increase.onset = numeric(length(cogRewTypes)),
+  smooth.increase.offset = numeric(length(cogRewTypes)),
+  smooth.last.change = numeric(length(cogRewTypes)),
+  max.age.fitted = numeric(length(cogRewTypes))
+    )
+
+gam.fittedvalues <- data.frame(CogRewType = factor(), visit_age = numeric(), fitted = numeric(), fitted2 = numeric(), se = numeric(), lower_ci = numeric(), upper_ci=numeric())
+
+gam.smoothestimates <- data.frame(CogRewType = factor(), visit_age = numeric(), estimate = numeric(), se = numeric())
+
+gam.derivatives <- data.frame(CogRewType = factor(), visit_age = numeric(), derivative = numeric(), lower = numeric(),
+                              upper = numeric(), significant = numeric(), significant_deriv = numeric()) 
+
+gam.pred <- data.frame(CogRewType = factor(), visit_age = numeric(), predicted = numeric(), se = numeric(),
+                              lower = numeric(), upper = numeric()) 
+
+for (subst in seq_along(cogRewTypes)) {
+  sub_df <- Anti_Saccade[Anti_Saccade$oCogRewType == cogRewTypes[subst], ]  # Subset data
+  
+gam.model <- mgcv::gamm(corrat ~ s(visit_age, fx = F, k = 4, bs = "cs") + sex + oIncome_recode + oRaceeth_recode + site, 
+             random = list(subject = ~1, subject = ~0 + visit_age),
+             data=sub_df,
+             method = "REML")
+
+gam.results <- summary(gam.model$gam)
+
+df <- as.data.frame(unclass(gam.model$gam$model),stringsAsFactors = TRUE)
+np <- 200
+thisPred <- data.frame(init = rep(0,np))
+theseVars <- attr(gam.model$gam$terms, "term.labels")
+varClasses <- attr(gam.model$gam$terms,"dataClasses")
+thisResp <- as.character(gam.model$gam$terms[[2]])
+smooth_var <- "visit_age"
+for (v in c(1:length(theseVars))) {
+  thisVar <- theseVars[[v]]
+  thisClass <- varClasses[thisVar]
+  if (thisVar == smooth_var) {
+    thisPred[,smooth_var] = seq(min(df[,smooth_var],na.rm=T), max(df[,smooth_var], na.rm=T), length.out = np)
+  } else {
+      switch (thisClass,
+              "numeric" = {thisPred[,thisVar] = median(df[,thisVar])}, #make predictions based on median value
+              "character" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]}, #make predictions based on first level of char
+              "factor" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]}, #make predictions based on first level of factor 
+              "ordered" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]} #make predictions based on first level of ordinal variable
+      )
+    }
+  }
+  pred <- thisPred %>% dplyr::select(-init)
+  
+## MODEL STATSTICS ##  
+#GAM derivatives
+#Get derivatives of the smooth function using finite differences
+derv <- gratia::derivatives(gam.model, term = sprintf('s(%s)',smooth_var), data = pred, interval = "simultaneous", unconditional = F) #derivative at 200 indices of smooth_var with a simultaneous CI
+  #Identify derivative significance window(s)
+  derv <- derv %>% #add "sig" column (TRUE/FALSE) to derv
+    mutate(sig = !(0 > .lower_ci & 0 < .upper_ci)) #derivative is sig if the lower CI is not < 0 while the upper CI is > 0 (i.e., when the CI does not include 0)
+  derv$sig_deriv = derv$.derivative*derv$sig #add "sig_deriv derivatives column where non-significant derivatives are set to 0
+  mean.derivative <- mean(derv$.derivative)
+  
+  #Model summary outputs
+  #Signed F value for the smooth term and GAM-based significance of the smooth term
+  gam.smooth.F <- gam.results$s.table[1,3] #first row is s(smooth_var), third entry is F
+  gam.smooth.Rsq <- gam.results$r.sq
+  if(mean.derivative < 0){ #if the average derivative is less than 0, make the effect size estimate negative
+    gam.smooth.F <- gam.smooth.F*-1}
+  
+  gam.smooth.pvalue <- gam.results$s.table[1,4] #first row is s(smooth_var), fourth entry is p-value
+
+ #Derivative-based temporal characteristics
+  #Age of developmental change onset
+  if(sum(derv$sig) > 0){ #if derivative is significant at at least 1 age
+    change.onset <- min(derv$visit_age[derv$sig==T])} #find first age in the smooth where derivative is significant
+  if(sum(derv$sig) == 0){ #if gam derivative is never significant
+    change.onset <- NA} #assign NA
+ 
+  #Age of maximal developmental change
+  if(sum(derv$sig) > 0){ 
+    derv$abs_sig_deriv = round(abs(derv$sig_deriv),5) #absolute value significant derivatives
+    maxval <- max(derv$abs_sig_deriv) #find the largest derivative
+    window.peak.change <- derv$visit_age[derv$abs_sig_deriv == maxval] #identify the age(s) at which the derivative is greatest in absolute magnitude
+    peak.change <- mean(window.peak.change)} #identify the age of peak developmental change
+  if(sum(derv$sig) == 0){ 
+    peak.change <- NA}  
+ 
+  #Age of decrease onset
+  if(sum(derv$sig) > 0){ 
+    decreasing.range <- derv$visit_age[derv$sig_deriv < 0] #identify all ages with a significant negative derivative (i.e., smooth_var indices where y is decreasing)
+    if(length(decreasing.range) > 0)
+      decrease.onset <- min(decreasing.range) #find youngest age with a significant negative derivative
+    if(length(decreasing.range) == 0)
+      decrease.onset <- NA}
+  if(sum(derv$sig) == 0){
+    decrease.onset <- NA}  
+
+    #Age of decrease offset
+  if(sum(derv$sig) > 0){ 
+    decreasing.range <- derv$visit_age[derv$sig_deriv < 0] #identify all ages with a significant negative derivative (i.e., smooth_var indices where y is decreasing)
+    if(length(decreasing.range) > 0){
+      last.decrease <- max(decreasing.range) #find oldest age with a significant negative derivative
+      if(last.decrease == derv$visit_age[length(derv$visit_age)]) #if the last age of significant decrease is the oldest in the dataset
+        decrease.offset <- last.decrease
+      if(last.decrease != derv$visit_age[length(derv$visit_age)]){ 
+        decrease.offset.row <- which(derv$visit_age == last.decrease) + 1 #use above to find the first age when the derivative is not significant
+        decrease.offset <- derv$visit_age[decrease.offset.row]}
+    }
+    if(length(decreasing.range) == 0)
+      decrease.offset <- NA}
+  if(sum(derv$sig) == 0){ 
+    decrease.offset <- NA}  
+
+  #Age of increase onset
+  if(sum(derv$sig) > 0){ 
+    increasing.range <- derv$visit_age[derv$sig_deriv > 0] #identify all ages with a significant positive derivative (i.e., smooth_var indices where y is increasing)
+    if(length(increasing.range) > 0)
+      increase.onset <- min(increasing.range) #find oldest age with a significant positive derivative
+    if(length(increasing.range) == 0)
+      increase.onset <- NA}
+  if(sum(derv$sig) == 0){ 
+    increase.onset <- NA}  
+ 
+#Age of increase offset
+  if(sum(derv$sig) > 0){ 
+    increasing.range <- derv$visit_age[derv$sig_deriv > 0] #identify all ages with a significant positive derivative (i.e., smooth_var indices where y is increasing)
+    if(length(increasing.range) > 0){
+      last.increase <- max(increasing.range) #find oldest age with a significant positive derivative
+      if(last.increase == derv$visit_age[length(derv$visit_age)]) #if the last age of significant increase is the oldest in the dataset
+        increase.offset <- last.increase
+      if(last.increase != derv$visit_age[length(derv$visit_age)]){ 
+        increase.offset.row <- which(derv$visit_age == last.increase) + 1 #use above to find the first age when the derivative is not significant
+        increase.offset <- derv$visit_age[increase.offset.row]}
+    }
+    if(length(increasing.range) == 0)
+      increase.offset <- NA}
+  if(sum(derv$sig) == 0){ 
+    increase.offset <- NA}  
+  
+ #Age of last change
+  if(sum(derv$sig) > 0){ 
+    change.offset <- max(derv$visit_age[derv$sig==T])} #find last age in the smooth where derivative is significant
+  if(sum(derv$sig) == 0){ 
+    change.offset <- NA}  
+  
+gam.statistics$CogRewType[subst] <- cogRewTypes[subst]
+gam.statistics$GAM.smooth_Fvalue[subst] <- gam.smooth.F
+gam.statistics$GAM.smooth_RSq[subst] <- gam.smooth.Rsq
+
+gam.statistics$GAM.smooth.pvalue[subst] <- gam.smooth.pvalue
+
+gam.statistics$smooth.change.onset[subst] <- change.onset
+gam.statistics$smooth.peak.change[subst] <- peak.change
+gam.statistics$smooth.decrease.onset[subst] <- decrease.onset
+gam.statistics$smooth.decrease.offset[subst] <- decrease.offset
+gam.statistics$smooth.increase.onset[subst] <- increase.onset
+gam.statistics$smooth.increase.offset[subst] <- increase.offset
+gam.statistics$smooth.last.change[subst] <- change.offset
+ #Generate predictions (fitted values) based on the gam model and predication data frame
+gam.fittedvalues_temp <- gratia::fitted_values(object = gam.model, data = pred)
+gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+  
+maxval2 <- max(gam.fittedvalues_temp$.fitted) #find the largest derivative
+gam.statistics$max.age.fitted[subst] <- gam.fittedvalues_temp$visit_age[gam.fittedvalues_temp$.fitted == maxval2] #identify the age(s) at which the 
+gam.statistics$max.val.fitted[subst] <- maxval2
+# gam.fittedvalues_temp <- plogis(fitted(gam.model$gam))*30
+
+temp_fit <- data.frame(
+  CogRewType = factor(cogRewTypes[subst]),
+  visit_age = gam.fittedvalues_temp$visit_age, 
+  fitted = gam.fittedvalues_temp$.fitted, 
+  fitted2 = gam.fittedvalues_temp$.fitted2, 
+  se = gam.fittedvalues_temp$.se, 
+  lower_ci = gam.fittedvalues_temp$.lower_ci, 
+  upper_ci = gam.fittedvalues_temp$.upper_ci)
+gam.fittedvalues <- bind_rows(gam.fittedvalues, temp_fit)
+
+gam.smoothvalues_temp <- gratia::smooth_estimates(object = gam.model, data = pred, smooth = sprintf('s(%s)',smooth_var))
+
+temp_smooth <- data.frame(
+  CogRewType = factor(cogRewTypes[subst]),
+  visit_age = gam.smoothvalues_temp$visit_age, 
+  estimate = gam.smoothvalues_temp$.estimate,  
+  se = gam.smoothvalues_temp$.se)
+gam.smoothestimates <- bind_rows(gam.smoothestimates, temp_smooth)
+
+temp_deriv <- data.frame(
+  CogRewType = factor(cogRewTypes[subst]),
+  visit_age = derv$visit_age, 
+  derivative = derv$.derivative, 
+  lower = derv$.lower_ci,
+  upper = derv$.upper_ci, 
+  significant = derv$sig, 
+  significant_deriv = derv$sig_deriv)
+
+gam.derivatives <- bind_rows(gam.derivatives, temp_deriv)
+
+gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+
+temp_pred <- data.frame(
+  CogRewType = factor(cogRewTypes[subst]),
+  visit_age = gam.pred_temp$x,
+  predicted = gam.pred_temp$predicted, 
+  se = gam.pred_temp$std.error,
+  lower = gam.pred_temp$conf.low, 
+  upper = gam.pred_temp$conf.high)
+
+gam.pred <- bind_rows(gam.pred, temp_pred)  
+
+}
+
+
+#Calculate the average first derivative in each region at each substance
+deriv_rate <- gam.derivatives %>% group_by(CogRewType) %>% do(deriv_rate = mean(.$derivative)) %>% unnest(cols = "deriv_rate")
+
+gam.statistics <- merge(gam.statistics, deriv_rate, by = "CogRewType")
+
+corrat.gam.statistics <- gam.statistics 
+corrat.gam.fittedvalues <- gam.fittedvalues
+corrat.gam.derivatives <- gam.derivatives
+corrat.gam.pred <- gam.pred
+corrat.gam.smoothestimates <- gam.smoothestimates
+
+
+# corrat.gam.statistics[] <- lapply(corrat.gam.statistics, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+custom_order <- c("main", "rew", "neu")
+# Convert to factor with levels in custom order
+corrat.gam.statistics <- corrat.gam.statistics %>%
+  mutate(CogRewType = factor(CogRewType, levels = custom_order)) %>%
+  arrange(CogRewType)
+
+write.csv(corrat.gam.statistics, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Smooth_Statistics_Across_AntiTrialTypes_FullSample.csv', row.names = FALSE)
+ 
+
+```  
+
+### Plots:
+
+```{r, echo = FALSE, fig.align='center'}
+
+# Age by anti-saccade performance: All trial types, no datapoints
+age1 <- ggplot(Anti_Saccade,
+                    aes(x=visit_age, y=corrat, color=oCogRewType,fill=oCogRewType))+
+  geom_smooth(method="gam", formula = y ~ s(x, k = 4, fx = FALSE, bs = "cs"))+
+   scale_color_manual(values=anti_colorbar)+
+   scale_fill_manual(values=anti_colorbar)+
+   theme(aspect.ratio=.5, legend.position = "none",
+                strip.background = element_blank(),
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+  scale_x_continuous(limits = c(12, 24.5), breaks = seq(12, 24, by = 3))+
+     labs(x = "\nAge",
+       y = "Performance (% Correct)\n")
+print(age1)
+
+# Age by anti-saccade performance: Trial types separately, trajectories shown 
+age2 <- ggplot(Anti_Saccade,
+                    aes(x=visit_age, y=corrat, color=oCogRewType,fill=oCogRewType))+ 
+  geom_line(data= Anti_Saccade,
+            aes(y=corrat, x = visit_age, group=subject), alpha=.1, color = "black",
+            linewidth = .25)+ facet_wrap(~oCogRewType, scales = "free")+
+  scale_fill_manual(values = anti_colorbar)+ 
+  scale_color_manual(values = anti_colorbar)+ 
+  geom_smooth(method="gam", formula = y ~ s(x, k = 4, fx = FALSE, bs = "cs"))+
+  theme(legend.position = "none", aspect.ratio=.5,
+               strip.background = element_blank(),
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+  scale_x_continuous(limits = c(12, 24.5), breaks = seq(12, 24, by = 3))+
+     labs(x = "\nAge",
+       y = "Performance (% Correct)\n")
+print(age2)
+               
+# Derivative plots for Anti-Saccade Performance: Trial types separately 
+
+derv<- corrat.gam.derivatives[corrat.gam.derivatives$CogRewType=="main",] 
+d1<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = anti_colorbar[1], midpoint = 0, mid = "white",
+                           high = anti_colorbar[1])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) + geom_vline(data = corrat.gam.statistics[gam.statistics$CogRewType=="main",], aes(xintercept=smooth.increase.offset), color="black") +
+      geom_vline(data = corrat.gam.statistics[gam.statistics$CogRewType=="main",], aes(xintercept=smooth.increase.onset), color="black") +
+  scale_x_continuous(limits = c(12, 24.5), breaks = seq(12, 24, by = 3))+
+         labs(y="\nx", x="\nAge")
+
+
+derv<- corrat.gam.derivatives[corrat.gam.derivatives$CogRewType=="neu",] 
+d2<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = anti_colorbar[2], midpoint = 0, mid = "white",
+                           high = anti_colorbar[2])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) + geom_vline(data = corrat.gam.statistics[gam.statistics$CogRewType=="neu",], aes(xintercept=smooth.increase.offset), color="black") +
+      geom_vline(data = corrat.gam.statistics[gam.statistics$CogRewType=="neu",], aes(xintercept=smooth.increase.onset), color="black") +
+  scale_x_continuous(limits = c(12, 24.5), breaks = seq(12, 24, by = 3))+
+  labs(y="\nx", x="\nAge")
+
+derv<- corrat.gam.derivatives[corrat.gam.derivatives$CogRewType=="rew",] 
+d3<- ggplot(data=derv) + geom_tile(aes(x = visit_age, y = .5, fill = significant_deriv))+
+      scale_fill_gradient2(low = anti_colorbar[3], midpoint = 0, mid = "white",
+                           high = anti_colorbar[3])+#, limits = c(0, max_val))+ 
+    theme(aspect.ratio = .05, panel.grid.major = element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.background=element_blank(), 
+          axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+          axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+          axis.line = element_line(linewidth = .2), 
+          axis.ticks = element_line(linewidth = .2),
+          legend.key.width = unit(1,"cm"),
+          legend.key.height = unit(.5,"cm"),
+          legend.position = "bottom",
+          plot.margin = unit(c(0, 0, 0, 0), "cm"))+
+    guides(fill = guide_colorbar(reverse = F,direction = "horizontal",title.position = "top")) + geom_vline(data = corrat.gam.statistics[gam.statistics$CogRewType=="rew",], aes(xintercept=smooth.increase.offset), color="black") +
+      geom_vline(data = corrat.gam.statistics[gam.statistics$CogRewType=="rew",], aes(xintercept=smooth.increase.onset), color="black") +
+  scale_x_continuous(limits = c(12, 24.5), breaks = seq(12, 24, by = 3))+
+  labs(y="\nx", x="\nAge")
+ 
+
+Derv <- ggarrange(d1, d2, d3, 
+                    ncol = 3, nrow = 1)
+Derv
+
+
+ggsave(age1, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Age_AllTrials.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+ggsave(age2, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Age_AllTrials_Sep.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+ggsave(Derv, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Age_Deriv_AllTrials_Sep.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+
+gam.statistics$oCogRewType <- ordered(gam.statistics$CogRewType, levels = c("main","neu","rew"))
+
+# Age of Peak Anti-Saccade Performance Identified by smooth fits in GAM models
+age1_5 <- gam.statistics %>% ungroup () %>%  
+  ggplot(aes(x = max.age.fitted, y = oCogRewType, fill = oCogRewType)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = anti_colorbar) +
+   labs(x = "\nAge of Peak Performance (smooth)",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))+
+      scale_x_continuous(limits = c(24, 24.5), breaks = seq(24, 24.5, by = .25))+  
+  theme(aspect.ratio = 1.5,
+       strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age1_5)
+
+# Average derivative indicating rate of change (increase in this case)
+age2_5 <- gam.statistics %>% ungroup () %>% 
+  ggplot(aes(x = deriv_rate, y = oCogRewType, fill = oCogRewType)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = anti_colorbar) +
+  labs(x = "\nRate of Increase",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))+
+        scale_x_continuous(limits = c(1, 1.6), breaks = seq(1, 1.6, by = .20))+ #Formatting best for
+  theme(aspect.ratio = 1.5,
+ strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age2_5)
+
+# Age of maturation idicated by last age where derivative did not contain 0 
+age3_5 <- gam.statistics %>% ungroup () %>%  
+  ggplot(aes(x = smooth.last.change, y = oCogRewType, fill = oCogRewType)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = anti_colorbar) +
+  labs(x = "\nAge of Maturation",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))+
+        scale_x_continuous(limits = c(20, 21), breaks = seq(20, 21, by = .5))+
+  theme(aspect.ratio = 1.5,
+        strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age3_5)
+
+# Peak change age identified by the smooth
+age4_5 <- gam.statistics %>% ungroup () %>%  
+  ggplot(aes(x = smooth.peak.change, y = oCogRewType, fill = oCogRewType)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = anti_colorbar) +
+  labs(x = "\nAge of Peak Change",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))+
+        scale_x_continuous(limits = c(12, 12.5), breaks = seq(12, 12.5, by = .25))+
+  theme(aspect.ratio = 1.5,
+  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age4_5)
+
+# Age at which significant increases (first age where derivative did not include 0) started 
+age5_5 <- gam.statistics %>% ungroup () %>%  
+  ggplot(aes(x = smooth.increase.onset, y = oCogRewType, fill = oCogRewType)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = anti_colorbar) +
+  labs(x = "\nIncrease Onset (Age)",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))+
+        scale_x_continuous(limits = c(11, 13), breaks = seq(11, 13, by = 1))+ 
+  theme(aspect.ratio = 1.5,
+  legend.position = "none",
+  strip.background = element_blank(),
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age5_5)
+
+
+# Age at which significant increases (upper age where derivative included 0) ended 
+age6_5 <- gam.statistics %>% ungroup () %>%  
+  ggplot(aes(x = smooth.increase.offset, y = oCogRewType, fill = oCogRewType)) +
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = anti_colorbar) +
+    labs(x = "\nIncrease Offset (Age)",
+       y = "Trial Type\n") +
+  scale_y_discrete(
+    breaks = c("main", "rew", "neu"),
+    labels = c("Mean", "Rew.", "Neu."))+    
+      scale_x_continuous(limits = c(20, 21), breaks = seq(20, 21, by = .5))+
+  theme(aspect.ratio = 1.5,
+  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age6_5)
+
+ 
+
+AS_Plots_Age1 <- ggarrange(age1_5, age2_5, age3_5,
+                    ncol = 3, nrow = 1)
+AS_Plots_Age1
+ 
+
+AS_Plots_Age2 <- ggarrange(age4_5, age5_5, age6_5,
+                    ncol = 3, nrow = 1)
+AS_Plots_Age2 
+
+ggsave(AS_Plots_Age1, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Age_AllTrials_Gam_Stats1.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(AS_Plots_Age2, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Age_AllTrials_Gam_Stats2.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+``` 
+
+## Demographic Factors
+
+### All Participants (no covariates)
+```{r, echo = FALSE, fig.align='center'}
+
+set.seed(1)
+
+
+cogRewType <- levels(Anti_Saccade$oCogRewType)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over cogRewType & sexes
+# ----------------------------
+for (subst in cogRewType) {
+    
+    sub_df <- Anti_Saccade %>%
+      filter(oCogRewType == subst)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.max(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      CogRewType = subst,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      CogRewType = subst, 
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      CogRewType = subst, 
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      CogRewType = subst,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      CogRewType = subst, 
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(CogRewType) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_all <- left_join(gam.statistics, deriv_rate, by = c("CogRewType"))
+gam.statistics_all$Label <- "All"
+gam.fittedvalues_all <- gam.fittedvalues
+gam.fittedvalues_all$Label <- "All"
+gam.pred_all <- gam.pred
+gam.pred_all$Label <- "All"
+gam.derivatives_all <- gam.derivatives
+gam.derivatives_all$Label <- "All"
+
+``` 
+
+###Sex 
+```{r, echo = FALSE, fig.align='center'}
+
+cogRewType <- levels(Anti_Saccade$oCogRewType)
+sexes <- levels(Anti_Saccade$sex)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over cogRewType & sexes
+# ----------------------------
+for (subst in cogRewType) {
+  for (sx in sexes) {
+    
+    sub_df <- Anti_Saccade %>%
+      filter(oCogRewType == subst, sex == sx)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.max(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      CogRewType = subst,
+      Label = sx,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+}
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(CogRewType, Label) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_sex <- left_join(gam.statistics, deriv_rate, by = c("CogRewType","Label"))
+gam.fittedvalues_sex <- gam.fittedvalues
+gam.pred_sex <- gam.pred
+gam.derivatives_sex <- gam.derivatives
+
+``` 
+
+###Income 
+```{r, echo = FALSE, fig.align='center'}
+
+cogRewType <- levels(Anti_Saccade$oCogRewType)
+incomes <- levels(Anti_Saccade$oIncome_recode)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over cogRewType & incomes
+# ----------------------------
+for (subst in cogRewType) {
+  for (sx in incomes) {
+    
+    sub_df <- Anti_Saccade %>%
+      filter(oCogRewType == subst, oIncome_recode == sx)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.max(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      CogRewType = subst,
+      Label = sx,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+}
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(CogRewType, Label) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_income <- left_join(gam.statistics, deriv_rate, by = c("CogRewType","Label"))
+gam.fittedvalues_income <- gam.fittedvalues
+gam.pred_income <- gam.pred
+gam.derivatives_income <- gam.derivatives
+
+``` 
+
+###Race 
+```{r, echo = FALSE, fig.align='center'}
+
+cogRewType <- levels(Anti_Saccade$oCogRewType)
+races <- levels(Anti_Saccade$oRaceeth_recode)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over cogRewType & incomes
+# ----------------------------
+for (subst in cogRewType) {
+  for (sx in races) {
+    
+    sub_df <- Anti_Saccade %>%
+      filter(oCogRewType == subst, oRaceeth_recode == sx)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.max(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      CogRewType = subst,
+      Label = sx,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+}
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(CogRewType, Label) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_raceeth <- left_join(gam.statistics, deriv_rate, by = c("CogRewType","Label"))
+gam.fittedvalues_raceeth <- gam.fittedvalues
+gam.pred_raceeth <- gam.pred
+gam.derivatives_raceeth <- gam.derivatives
+
+``` 
+
+
+### Site
+```{r, echo = FALSE, fig.align='center'}
+
+cogRewType <- levels(Anti_Saccade$oCogRewType)
+sites <- levels(Anti_Saccade$site)
+
+# Initialize output containers
+gam.statistics <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_RSq = numeric(),
+  GAM.smooth.pvalue = numeric(),
+  smooth.change.onset = numeric(),
+  smooth.peak.change = numeric(),
+  smooth.decrease.onset = numeric(),
+  smooth.decrease.offset = numeric(),
+  smooth.increase.onset = numeric(),
+  smooth.increase.offset = numeric(),
+  smooth.last.change = numeric(),
+  max.age.fitted = numeric(),
+  max.val.fitted = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  fitted = numeric(),
+  fitted2 = numeric(),
+  se = numeric(),
+  lower_ci = numeric(),
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  estimate = numeric(),
+  se = numeric()
+)
+
+gam.derivatives <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  derivative = numeric(),
+  lower = numeric(),
+  upper = numeric(),
+  significant = numeric(),
+  significant_deriv = numeric()
+)
+
+gam.pred <- data.frame(
+  CogRewType = factor(),
+  Label = factor(),
+  visit_age = numeric(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# ----------------------------
+# Loop over cogRewType & incomes
+# ----------------------------
+for (subst in cogRewType) {
+  for (sx in sites) {
+    
+    sub_df <- Anti_Saccade %>%
+      filter(oCogRewType == subst, site == sx)
+    
+    # if (nrow(sub_df) < 10) next  # skip if too few rows
+    
+    gam.model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = F, bs = "cs"),
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    
+    np <- 200
+    pred <- data.frame(visit_age = seq(min(df$visit_age, na.rm = TRUE),
+                                       max(df$visit_age, na.rm = TRUE),
+                                       length.out = np))
+    
+    ## Derivatives
+    derv <- gratia::derivatives(gam.model, term = "s(visit_age)", 
+                                data = pred, interval = "simultaneous", unconditional = FALSE)
+    derv <- derv %>% mutate(sig = !(0 > .lower_ci & 0 < .upper_ci),
+                            sig_deriv = .derivative * sig)
+    
+    mean.derivative <- mean(derv$.derivative)
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    if(mean.derivative < 0) gam.smooth.F <- -gam.smooth.F
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    ## Temporal characteristics
+    change.onset <- ifelse(any(derv$sig), min(derv$visit_age[derv$sig]), NA)
+    peak.change <- ifelse(any(derv$sig),
+                          mean(derv$visit_age[which.max(abs(derv$sig_deriv))]),
+                          NA)
+    decrease.onset <- ifelse(any(derv$sig_deriv < 0), min(derv$visit_age[derv$sig_deriv < 0]), NA)
+    decrease.offset <- ifelse(any(derv$sig_deriv < 0), max(derv$visit_age[derv$sig_deriv < 0]), NA)
+    increase.onset <- ifelse(any(derv$sig_deriv > 0), min(derv$visit_age[derv$sig_deriv > 0]), NA)
+    increase.offset <- ifelse(any(derv$sig_deriv > 0), max(derv$visit_age[derv$sig_deriv > 0]), NA)
+    change.offset <- ifelse(any(derv$sig), max(derv$visit_age[derv$sig]), NA)
+    
+    ## Fitted values & maxval2
+    gam.fittedvalues_temp <- gratia::fitted_values(gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    maxval2 <- max(gam.fittedvalues_temp$.fitted, na.rm = TRUE)
+    max.age.fitted <- gam.fittedvalues_temp$visit_age[which.max(gam.fittedvalues_temp$.fitted)]
+    
+    ## Save stats
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      CogRewType = subst,
+      Label = sx,
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_RSq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue,
+      smooth.change.onset = change.onset,
+      smooth.peak.change = peak.change,
+      smooth.decrease.onset = decrease.onset,
+      smooth.decrease.offset = decrease.offset,
+      smooth.increase.onset = increase.onset,
+      smooth.increase.offset = increase.offset,
+      smooth.last.change = change.offset,
+      max.age.fitted = max.age.fitted,
+      max.val.fitted = maxval2
+    ))
+    
+    ## Save fitted values
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = gam.fittedvalues_temp$visit_age,
+      fitted = gam.fittedvalues_temp$.fitted,
+      fitted2 = gam.fittedvalues_temp$.fitted2,
+      se = gam.fittedvalues_temp$.se,
+      lower_ci = gam.fittedvalues_temp$.lower_ci,
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    ))
+    
+    ## Save smooth estimates
+    gam.smoothvalues_temp <- gratia::smooth_estimates(gam.model, data = pred, smooth = "s(visit_age)")
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = gam.smoothvalues_temp$visit_age,
+      estimate = gam.smoothvalues_temp$.estimate,
+      se = gam.smoothvalues_temp$.se
+    ))
+    
+    ## Save derivatives
+    gam.derivatives <- bind_rows(gam.derivatives, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = derv$visit_age,
+      derivative = derv$.derivative,
+      lower = derv$.lower_ci,
+      upper = derv$.upper_ci,
+      significant = derv$sig,
+      significant_deriv = derv$sig_deriv
+    ))
+    
+    ## Save predictions
+    gam.pred_temp <- ggpredict(gam.model, terms=c("visit_age"))
+    gam.pred <- bind_rows(gam.pred, data.frame(
+      CogRewType = subst, Label = sx,
+      visit_age = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted,
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low,
+      upper = gam.pred_temp$conf.high
+    ))
+  }
+}
+
+# Average derivative per group
+deriv_rate <- gam.derivatives %>%
+  group_by(CogRewType, Label) %>%
+  dplyr::summarise(deriv_rate = mean(derivative, na.rm = TRUE), .groups = "drop")
+
+gam.statistics_site <- left_join(gam.statistics, deriv_rate, by = c("CogRewType","Label"))
+gam.fittedvalues_site <- gam.fittedvalues
+gam.pred_site <- gam.pred
+gam.derivatives_site <- gam.derivatives
+
+``` 
+
+#### Combine the pred 
+```{r, echo = FALSE, fig.align='center'}
+
+All_Corrat_Fitted <- rbind(gam.fittedvalues_sex, gam.fittedvalues_income, 
+                           gam.fittedvalues_raceeth, gam.fittedvalues_site,
+                           gam.fittedvalues_all)
+
+All_Corrat_Pred <- rbind(gam.pred_sex, gam.pred_income, 
+                         gam.pred_raceeth, gam.pred_site, gam.pred_all)
+
+All_Corrat_Stats <- rbind(gam.statistics_sex, gam.statistics_income,
+                          gam.statistics_raceeth, gam.statistics_site, 
+                          gam.statistics_all)
+
+All_Corrat_Derivs <- rbind(gam.derivatives_sex, gam.derivatives_income,
+                          gam.derivatives_raceeth, gam.derivatives_site, 
+                          gam.derivatives_all)
+
+
+# All_SU_SES_Statistics[] <- lapply(All_SU_SES_Statistics, function(x) if (is.numeric(x)) round(x, 2) else x)
+
+custom_order <- c("main", "rew", "neu")
+All_Corrat_Stats <- All_Corrat_Stats %>%
+  mutate(CogRewType = factor(CogRewType, levels = custom_order)) %>%
+  arrange(CogRewType)
+
+write.csv(All_Corrat_Stats, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Smooth_Statistics_Across_ASTrialTypes_SES.csv', row.names = FALSE)
+
+``` 
+
+### Plots:
+
+``` {r, echo = FALSE, fig.align='center'}
+
+
+All_Corrat_Stats$oLabel<-ordered(All_Corrat_Stats$Label,
+levels=c("C", "A", "Other","Non-Hispanic Black/AA", "Non-Hispanic White", "Hispanic", 
+         "Asian AIAN NHPI OTHER", "200k+","100k-199k","75k-99k","50k-74k", "25k-49k","<25k", 
+         "M","F","All"))
+
+All_Corrat_Pred$oLabel<-ordered(All_Corrat_Pred$Label,
+levels=c("C", "A", "Other","Non-Hispanic Black/AA", "Non-Hispanic White", "Hispanic", 
+         "Asian AIAN NHPI OTHER", "200k+","100k-199k","75k-99k","50k-74k", "25k-49k","<25k", 
+         "M","F","All"))
+
+col_scale_btc <- c("grey60","grey60","grey60","grey60","grey60","grey60",
+                   "grey60","grey60","grey60","grey60","grey60","grey60",
+                   "grey60","grey60","grey60","#12250E")
+
+# Age by anti-saccade performance: All trial types, no datapoints - across all SES factors, model predicted values 
+
+age1_ses <- ggplot(All_Corrat_Pred,
+                    aes(x=visit_age, y=predicted, color=oLabel))+
+  geom_line(linewidth = 1) + facet_wrap(~CogRewType, scales="free")+
+   scale_color_manual(values=col_scale_btc)+
+   theme(aspect.ratio=.5, legend.position = "none",
+          strip.background = element_blank(),
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+    scale_y_continuous(limits = c(60, 100), breaks = seq(60, 100, by = 10))+
+    scale_x_continuous(limits = c(12, 24.5), breaks = seq(12, 24, by = 3))+
+  labs(x = "\nAge",
+       y = "Performance (% Correct)\n")
+ print(age1_ses)
+
+ 
+ggsave(age1_ses, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Age_AllTrials_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+
+# Age of Peak Anti-Saccade Performance Identified by smooth fits in GAM models
+age1_5_SES <- All_Corrat_Stats %>%   
+  ggplot(aes(x = max.age.fitted, y = oLabel, fill = oLabel)) +
+  facet_wrap(~CogRewType, scales = "free") + 
+  geom_point(shape = 21, size = 2.5, color = "white") +
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+    labs(x = "\nAge of Peak Performance (Smooth)",
+       y = "Subgroup\n")+
+      scale_x_continuous(limits = c(10, 25), breaks = seq(10, 25, by = 5))+ 
+  theme(aspect.ratio = 1.5,
+                  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age1_5_SES)
+
+# Average derivative indicating rate of change (increase in this case)
+age2_5_SES <- All_Corrat_Stats %>%  
+  ggplot(aes(x = deriv_rate, y = oLabel, fill = oLabel)) +
+    facet_wrap(~CogRewType, scales = "free") + 
+  geom_point(shape = 21, size = 2.5, color = "white") +
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+      labs(x = "\nRate of Increase",
+       y = "Subgroup\n")+
+        scale_x_continuous(limits = c(-.0001, 4), breaks = seq(0, 4, by = 1))+ 
+  theme(aspect.ratio = 1.5,
+                  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age2_5_SES)
+
+# Age of maturation indicated by last age where derivative did not contain 0 
+age3_5_SES <- All_Corrat_Stats %>%   
+  ggplot(aes(x = smooth.last.change, y = oLabel, fill = oLabel)) +
+      facet_wrap(~CogRewType, scales = "free") + 
+  geom_point(shape = 21, size = 2.5, color = "white") +
+   scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+        labs(x = "\nAge of Maturation",
+       y = "Subgroup\n")+
+          scale_x_continuous(limits = c(14, 22), breaks = seq(14, 22, by = 4))+ 
+  theme(aspect.ratio = 1.5,
+                  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age3_5_SES)
+
+# Peak change age identified by the smooth
+age4_5_SES <- All_Corrat_Stats %>%  
+  ggplot(aes(x = smooth.peak.change, y = oLabel, fill = oLabel)) +
+    facet_wrap(~CogRewType, scales = "free") + 
+  geom_point(shape = 21, size = 2.5, color = "white") +
+     scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+        labs(x = "\nAge of Peak Change",
+       y = "Subgroup\n")+
+            scale_x_continuous(limits = c(12, 18.5), breaks = seq(12, 18, by = 2))+
+  theme(aspect.ratio = 1.5,
+                  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age4_5_SES)
+
+# Age at which significant increases (first age where derivative did not include 0) started 
+age5_5_SES <- All_Corrat_Stats %>%  
+  ggplot(aes(x = smooth.increase.onset, y = oLabel, fill = oLabel)) +
+    facet_wrap(~CogRewType, scales = "free") + 
+  geom_point(shape = 21, size = 2.5, color = "white") +
+     scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+      labs(x = "\nIncrease Onset (Age)",
+       y = "Subgroup\n")+
+              scale_x_continuous(limits = c(12, 18), breaks = seq(12, 18, by = 2))+
+  theme(aspect.ratio = 1.5,
+                  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age5_5_SES)
+
+# Age at which significant increases (upper age where derivative included 0) ended 
+age6_5_SES <- All_Corrat_Stats %>%   
+  ggplot(aes(x = smooth.increase.offset, y = oLabel, fill = oLabel)) +
+    facet_wrap(~CogRewType, scales = "free") + 
+  geom_point(shape = 21, size = 2.5, color = "white") +
+     scale_color_manual(values=Demo_Colors)+  
+   scale_fill_manual(values=Demo_Colors)+  
+      labs(x = "\nIncrease Offset (Age)",
+       y = "Subgroup\n")+
+              scale_x_continuous(limits = c(16, 21), breaks = seq(16, 20, by = 2))+
+  theme(aspect.ratio = 1.5,
+                  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(age6_5_SES)
+
+
+ggsave(age1_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Age_AllTrials_Gam_Stats_PeakPerf_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age2_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Age_AllTrials_Gam_Stats_RateofInc_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age3_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Age_AllTrials_Gam_Stats_MatureAge_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age4_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Age_AllTrials_Gam_Stats_PeakChangeAge_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age5_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Age_AllTrials_Gam_Stats_IncOnsetAge_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+ggsave(age6_5_SES, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_Age_AllTrials_Gam_Stats_IncOffsetAge_SES.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+``` 
+
+# Substance Use Analyses
+## Subset DFs 
+```{r, echo = FALSE, fig.align='center'}
+
+set.seed(1) #for consistency in derivatives + derivative credible intervals
+
+
+### Subset DF 
+Anti_Saccade_Only <- Anti_Saccade %>% dplyr::select(subject,
+                                                    visit, sex, visit_age, site,
+                                               oIncome_recode,oRaceeth_recode, 
+                                               cogRewType, oCogRewType, corrat)
+# 
+# Anti_Substance <- Anti_Substance %>% dplyr::select(subject, visit, sex, 
+#                                                    visit_age, site,
+#                                                income_recode,raceeth_recode,
+#                                                cogRewType, 
+#                                                    oCogRewType, corrat,
+#                                                    contains("past_30"), contains("log_past30"))
+# Anti_Substance$cogRewType <- as.factor(Anti_Substance$cogRewType)
+
+Anti_Substance_Long <- Anti_Substance_Long %>% dplyr::select(subject, visit, sex, 
+                                                   visit_age, site,
+                                               income_recode,raceeth_recode,
+                                               cogRewType, Substance, oSubstance, 
+                                                   oCogRewType, corrat, Category, Usetype,
+                                                   contains("past_30"), contains("log_past30"))  
+Anti_Substance_Long$cogRewType <- as.factor(Anti_Substance_Long$cogRewType)
+Anti_Substance_Long$oCogRewType <- as.factor(Anti_Substance_Long$oCogRewType)
+
+``` 
+
+### Continuous Variable Analysis: Substance use by Anti-Saccade 
+#### Test whether effect of inhibitory control (Anti, mean) varies by substance
+
+```{r, echo = FALSE, fig.align='center'}
+
+# see if effect of AS differs across substances 
+GMM4_int <- bam(log_past30 ~ 1 + sex  +  income_recode + raceeth_recode + site + 
+    s(visit_age, k = 4, fx = F,  bs = "cs") +  
+      oSubstance + 
+      s(corrat, k = 3, fx = F)+
+    s(corrat, oSubstance, bs = "sz", k =3, fx = F) +      
+      s(subject, bs = "re") + s(subject, visit_age, bs = "re"), #implement random effects, 
+    data = Anti_Substance_Long %>% filter(oCogRewType=="main" & oSubstance!="All Prob"),
+    discrete = TRUE,
+    method = "fREML")
+summary(GMM4_int)
+anova(GMM4_int)
+
+
+int_gam.model_plot <- ggpredict(GMM4_int, terms = c("corrat","oSubstance"))
+plot(int_gam.model_plot)
+
+
+mm <- hypothesis_test(GMM4_int, 
+                terms = c("corrat","oSubstance"), test = NULL)
+
+``` 
+
+#### Substance use: Test for Associations with Antisaccade Across all Trial Types and Substances  
+
+```{r, echo = FALSE, fig.align='center'}
+
+#Loop over trial types & substances to get gamm model statistics
+
+cogrewtype <- levels(Anti_Substance_Long$cogRewType)
+substance_levels <- levels(Anti_Substance_Long$Substance)
+
+# Initialize output data frames
+gam.statistics <- data.frame(
+  CogRewType = factor(),
+  Substance = factor(),
+  GAM.smooth_Fvalue = numeric(),
+  GAM.smooth_Rsq = numeric(),
+  GAM.smooth.pvalue = numeric()
+)
+
+gam.fittedvalues <- data.frame(
+  CogRewType = factor(), 
+  Substance = factor(),
+  corrat = numeric(), 
+  fitted = numeric(), 
+  fitted2 = numeric(), 
+  se = numeric(), 
+  lower_ci = numeric(), 
+  upper_ci = numeric()
+)
+
+gam.smoothestimates <- data.frame(
+  CogRewType = factor(), 
+  Substance = factor(),
+  corrat = numeric(), 
+  estimate = numeric(), 
+  se = numeric()
+)
+
+gam.pred <- data.frame(
+  CogRewType = factor(), 
+  Substance = factor(),
+  corrat = numeric(), 
+  predicted = numeric(), 
+  se = numeric(),
+  lower = numeric(), 
+  upper = numeric()
+)
+
+# Nested loop: for each cogRewType, loop over each Substance
+for (cog in cogrewtype) {
+  for (subst in substance_levels) {
+    
+    sub_df <- Anti_Substance_Long %>%
+      filter(cogRewType == cog, Substance == subst)
+    
+    # if (nrow(sub_df) == 0) next  # skip if no rows
+    
+    gam.model <- mgcv::gamm(
+      log_past30 ~ s(corrat, fx = F, k = 3) + 
+        sex + income_recode + raceeth_recode + site + 
+        s(visit_age, fx = F, k = 4, bs = "cs"), 
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    gam.results <- summary(gam.model$gam)
+    
+    df <- as.data.frame(unclass(gam.model$gam$model), stringsAsFactors = TRUE)
+    np <- 200
+    thisPred <- data.frame(init = rep(0, np))
+    theseVars <- attr(gam.model$gam$terms, "term.labels")
+    varClasses <- attr(gam.model$gam$terms,"dataClasses")
+    thisResp <- as.character(gam.model$gam$terms[[2]])
+    smooth_var <- "corrat"
+    
+    for (v in seq_along(theseVars)) {
+      thisVar <- theseVars[[v]]
+      thisClass <- varClasses[thisVar]
+      if (thisVar == smooth_var) {
+        thisPred[,smooth_var] <- seq(min(df[,smooth_var],na.rm=T),
+                                     max(df[,smooth_var],na.rm=T),
+                                     length.out = np)
+      } else {
+        switch(thisClass,
+               "numeric" = {thisPred[,thisVar] = median(df[,thisVar], na.rm=TRUE)},
+               "character" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]},
+               "factor" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]},
+               "ordered" = {thisPred[,thisVar] = levels(df[,thisVar])[[1]]}
+        )
+      }
+    }
+    pred <- thisPred %>% dplyr::select(-init)
+    
+    ## MODEL STATISTICS ##  
+    gam.smooth.F <- gam.results$s.table[1,3]
+    gam.smooth.Rsq <- gam.results$r.sq
+    gam.smooth.pvalue <- gam.results$s.table[1,4]
+    
+    gam.statistics <- bind_rows(gam.statistics, data.frame(
+      CogRewType = factor(cog, levels = cogrewtype),
+      Substance = factor(subst, levels = substance_levels),
+      GAM.smooth_Fvalue = gam.smooth.F,
+      GAM.smooth_Rsq = gam.smooth.Rsq,
+      GAM.smooth.pvalue = gam.smooth.pvalue
+    ))
+    
+    ## FITTED VALUES ##
+    gam.fittedvalues_temp <- gratia::fitted_values(object = gam.model, data = pred)
+    gam.fittedvalues_temp$.fitted2 <- plogis(gam.fittedvalues_temp$.fitted) * 30
+    
+    temp_fit <- data.frame(
+      CogRewType = factor(cog, levels = cogrewtype),
+      Substance = factor(subst, levels = substance_levels),
+      corrat = gam.fittedvalues_temp$corrat, 
+      fitted = gam.fittedvalues_temp$.fitted, 
+      fitted2 = gam.fittedvalues_temp$.fitted2, 
+      se = gam.fittedvalues_temp$.se, 
+      lower_ci = gam.fittedvalues_temp$.lower_ci, 
+      upper_ci = gam.fittedvalues_temp$.upper_ci
+    )
+    gam.fittedvalues <- bind_rows(gam.fittedvalues, temp_fit)
+    
+    ## SMOOTH ESTIMATES ##
+    gam.smoothvalues_temp <- gratia::smooth_estimates(object = gam.model, data = pred, smooth = sprintf('s(%s)', smooth_var))
+    temp_smooth <- data.frame(
+      CogRewType = factor(cog, levels = cogrewtype),
+      Substance = factor(subst, levels = substance_levels),
+      corrat = gam.smoothvalues_temp$corrat, 
+      estimate = gam.smoothvalues_temp$.estimate,  
+      se = gam.smoothvalues_temp$.se
+    )
+    gam.smoothestimates <- bind_rows(gam.smoothestimates, temp_smooth)
+    
+    ## GGPREDICT ##
+    gam.pred_temp <- ggpredict(gam.model, terms = c("corrat"))
+    temp_pred <- data.frame(
+      CogRewType = factor(cog, levels = cogrewtype),
+      Substance = factor(subst, levels = substance_levels),
+      corrat = gam.pred_temp$x,
+      predicted = gam.pred_temp$predicted, 
+      se = gam.pred_temp$std.error,
+      lower = gam.pred_temp$conf.low, 
+      upper = gam.pred_temp$conf.high
+    )
+    gam.pred <- bind_rows(gam.pred, temp_pred)
+  }
+}
+
+
+custom_order <- c("All Prob", "Alcohol", "Binge", "Cannabis", 
+                  "Nicotine")
+
+custom_order2 <- c("main", "rew", "neu")
+
+
+gam.statistics <- gam.statistics %>%
+  mutate(CogRewType = factor(CogRewType, levels = custom_order2),
+         Substance = factor(Substance, levels = custom_order)) %>%
+  arrange(Substance)
+
+
+write.csv(gam.statistics, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/SU_Corrat_Statistics_Across_TrialTypes_FullSample.csv', row.names = FALSE)
+
+``` 
+
+#### Plots:
+```{r, echo = FALSE, fig.align='center'}
+
+gam.pred$Substance<-factor(gam.pred$Substance,
+levels=c("All Prob","Alcohol","Binge","Cannabis","Nicotine"))
+
+# Anti-saccade performance by Substance Use: All trial types, all substances, no datapoints - model predicted values adjusting for age and relevant demographic factors 
+SU_AS <- ggplot(gam.pred, 
+                    aes(x=corrat, y=predicted, color=Substance))+
+  facet_wrap(~CogRewType,scales="free")+
+    geom_smooth(method="gam", formula = y ~ s(x, k = 3, fx = FALSE), fullrange=F)+
+   scale_color_manual(values=substance_colorbar)+
+   scale_fill_manual(values=substance_colorbar)+
+     theme(aspect.ratio=.5, legend.position = "none",
+                  strip.background = element_blank(),
+         axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+        panel.grid.major = element_blank(),panel.grid.minor=element_blank(),
+        panel.background=element_blank()) +
+     labs(x = "\nPerformance (% Correct)",
+       y = "Substance Use (log)\n")
+print(SU_AS)
+
+
+ggsave(SU_AS, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_SU_Cont_AllTrials.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+gam.statistics$Substance <- ordered(gam.statistics$Substance, c("All Prob",
+                                                                                        "Alcohol",
+                                                                                        "Cannabis",
+                                                                                        "Nicotine",
+                                                                                        "Binge"))
+
+# Plots showing gam model F statistics for each comparison (substance)
+F1_5 <- gam.statistics %>% 
+  ggplot(aes(x = GAM.smooth_Fvalue, y = Substance, fill = Substance)) +
+  facet_wrap(~CogRewType, scales = "free")+
+  geom_point(shape = 21, size = 5.5, color = "white") +
+  scale_fill_manual(values = substance_colorbar2) +
+       labs(x = "\nF Statistic",
+       y = "Substance \n")+
+    scale_y_discrete(
+    breaks = c("All Prob", "Alcohol", "Cannabis", "Nicotine", "Binge"),
+    labels = c("All", "Alcohol", "Cannabis", "Nicotine", "Binge"))+
+      scale_x_continuous(limits = c(-.001, 1.75), breaks = seq(0, 1.5, by = .5))+ 
+  theme(aspect.ratio = 1.5,
+        strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(F1_5)
+
+ggsave(F1_5, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_SU_AllTrials_Fval.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")
+
+``` 
+
+### Frequency Category Analysis: Substance use by AntiSaccade 
+```{r, echo = FALSE, fig.align='center'}
+
+SU_Vars_Cat_Long <- Anti_Substance_Long %>% dplyr::select(subject, visit, sex, visit_age, site, income_recode,raceeth_recode,corrat, cogRewType, Substance, Category)
+SU_Vars_Cat_Long$cogRewType <-  as.factor(SU_Vars_Cat_Long$cogRewType)
+
+
+SU_Results.AS <- data.frame(
+  oCogRewType = factor(),
+  Substance = factor(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+gam.pred.AS <- data.frame(
+  oCogRewType = factor(),
+  Substance = factor(),
+  Drug_Category = factor(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# Loop through cogRewType × Substance
+for (s in unique(SU_Vars_Cat_Long$cogRewType)) {
+  for (sub in unique(SU_Vars_Cat_Long$Substance)) {
+    
+    # Subset data for this combo
+    sub_df <- SU_Vars_Cat_Long %>% 
+      filter(cogRewType == s, Substance == sub)
+    
+    # if (nrow(sub_df) == 0) next  # skip if no rows
+    
+    # Fit GAMM
+    model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + Category + income_recode + 
+        raceeth_recode + sex + site,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    # Extract ANOVA results
+    aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[1, 2]
+    p_val <- aov_result$pTerms.table[1, 3]
+    
+    SU_Results.AS <- rbind(
+      SU_Results.AS,
+      data.frame(
+        oCogRewType = s,
+        Substance = sub,
+        F_value = round(F_val, 2),
+        p_value = signif(p_val, 2),
+        stringsAsFactors = FALSE
+      )
+    )
+    
+    # Predictions for "Category"
+    get_preds <- ggpredict(model$gam, terms = c("Category"))
+    
+    gam.pred.AS <- rbind(
+      gam.pred.AS,
+      data.frame(
+        oCogRewType = s,
+        Substance = sub,
+        Drug_Category = get_preds$x,
+        predicted = get_preds$predicted,
+        se = get_preds$std.error,
+        lower = get_preds$conf.low,
+        upper = get_preds$conf.high
+      )
+    )
+  }
+}
+
+gam.pred.AS <- gam.pred.AS %>% filter(oCogRewType!="main")
+SU_Results.AS <- SU_Results.AS %>% filter(oCogRewType!="main")
+
+# Get a main effect model (regardless of trial type)
+
+
+SU_Results.AS2 <- data.frame(
+  Substance = factor(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+gam.pred.AS2 <- data.frame(
+  Substance = factor(),
+  Drug_Category = factor(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# Loop through cogRewType × Substance
+for (sub in unique(SU_Vars_Cat_Long$Substance)) {
+    
+    # Subset data for this combo
+    sub_df <- SU_Vars_Cat_Long[SU_Vars_Cat_Long$cogRewType!="main",] %>% 
+      filter(Substance == sub)
+    
+    if (nrow(sub_df) == 0) next  # skip if no rows
+    
+    # Fit GAMM
+    model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + Category + income_recode + 
+        raceeth_recode + sex + site + cogRewType,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    # Extract ANOVA results
+    aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[1, 2]
+    p_val <- aov_result$pTerms.table[1, 3]
+    
+    SU_Results.AS2 <- rbind(
+      SU_Results.AS2,
+      data.frame(
+        Substance = sub,
+        F_value = round(F_val, 2),
+        p_value = signif(p_val, 2),
+        stringsAsFactors = FALSE
+      )
+    )
+    
+    # Predictions for "Category"
+    get_preds <- ggpredict(model$gam, terms = c("Category"))
+    
+    gam.pred.AS2 <- rbind(
+      gam.pred.AS2,
+      data.frame(
+        Substance = sub,
+        Drug_Category = get_preds$x,
+        predicted = get_preds$predicted,
+        se = get_preds$std.error,
+        lower = get_preds$conf.low,
+        upper = get_preds$conf.high
+      )
+    )
+}
+
+
+gam.pred.AS2$oCogRewType <- "main"
+SU_Results.AS2$oCogRewType <- "main"
+gam.pred.AS <- rbind(gam.pred.AS, gam.pred.AS2)
+SU_Results.AS <- rbind(SU_Results.AS, SU_Results.AS2)
+
+custom_order <- c("main", "rew", "neu")
+
+custom_order2 <- c("Never", "Ever", "Regular")
+
+custom_order3 <- c("All Prob", "Alcohol", "Binge","Cannabis","Nicotine")
+
+# Convert to factor with levels in custom order
+SU_Results.AS_All <- SU_Results.AS %>%
+  mutate(oCogRewType = factor(oCogRewType, levels = custom_order)) %>%
+  mutate(Substance = factor(Substance, levels = custom_order3)) %>%
+  arrange(Substance, oCogRewType)
+
+gam.pred.AS_All <- gam.pred.AS %>%
+  mutate(Drug_Category = factor(Drug_Category, levels = custom_order2),
+         oCogRewType = factor(oCogRewType, levels = custom_order)) %>%
+    mutate(Substance = factor(Substance, levels = custom_order3)) %>%
+  arrange(Substance, oCogRewType, Drug_Category)
+
+
+write.csv(SU_Results.AS_All, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Main_Effects_FreqCategories_Across_ASTrialTypes.csv', row.names = FALSE)
+
+write.csv(gam.pred.AS_All, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Predicted_FreqCategories_Across_ASTrialTypes.csv', row.names = FALSE)
+
+``` 
+
+#### Plots: 
+```{r, echo = FALSE, fig.align='center'}
+
+# Plots showing anti-saccade performance by substance use category groups - model predictions adjusted for age and relevant covariates
+
+Freq1_5 <- gam.pred.AS_All %>% 
+  ggplot(aes(x = Drug_Category, y = predicted, fill = Substance)) +
+  facet_wrap(~oCogRewType, scales = "free")+
+  geom_point(shape = 21, size = 2.5, color = "white",position = position_dodge(0.3)) +
+  scale_fill_manual(values = substance_colorbar) +
+labs(x = "\nFrequency",
+       y = "Performance (% Correct)\n")+
+        scale_y_continuous(limits = c(70, 85), breaks = seq(70, 85, by = 5))+ 
+  theme(aspect.ratio = .5,
+        strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(Freq1_5)
+
+ggsave(Freq1_5, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_SU_FreqCat_AllTrials.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+``` 
+
+### Usetype Category Analysis: Substance use by AntiSaccade 
+```{r, echo = FALSE, fig.align='center'}
+  
+SU_Vars_Use_Long <- Anti_Substance_Long %>% dplyr::select(subject, visit, sex, visit_age, site, income_recode,raceeth_recode,corrat, cogRewType, Substance, Usetype)
+SU_Vars_Use_Long$cogRewType <-  as.factor(SU_Vars_Use_Long$cogRewType)
+
+SU_UT_Results.AS <- data.frame(
+  oCogRewType = factor(),
+  Substance = factor(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+gam.pred.UT_AS <- data.frame(
+  oCogRewType = factor(),
+  Substance = factor(),
+  Drug_Usetype = factor(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# Loop through cogRewType × Substance
+for (s in unique(SU_Vars_Use_Long$cogRewType)) {
+  for (sub in unique(SU_Vars_Use_Long$Substance)) {
+    
+    # Subset data for this combo
+    sub_df <- SU_Vars_Use_Long %>% 
+      filter(cogRewType == s, Substance == sub)
+    
+    # if (nrow(sub_df) == 0) next  # skip if no rows
+    
+    # Fit GAMM
+    model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + Usetype + income_recode + 
+        raceeth_recode + sex + site,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    # Extract ANOVA results
+    aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[1, 2]
+    p_val <- aov_result$pTerms.table[1, 3]
+    
+    SU_UT_Results.AS <- rbind(
+      SU_UT_Results.AS,
+      data.frame(
+        oCogRewType = s,
+        Substance = sub,
+        F_value = round(F_val, 2),
+        p_value = signif(p_val, 2),
+        stringsAsFactors = FALSE
+      )
+    )
+    
+    # Predictions for "Usetype"
+    get_preds <- ggpredict(model$gam, terms = c("Usetype"))
+    
+    gam.pred.UT_AS <- rbind(
+      gam.pred.UT_AS,
+      data.frame(
+        oCogRewType = s,
+        Substance = sub,
+        Drug_Usetype = get_preds$x,
+        predicted = get_preds$predicted,
+        se = get_preds$std.error,
+        lower = get_preds$conf.low,
+        upper = get_preds$conf.high
+      )
+    )
+  }
+}
+
+gam.pred.UT_AS <- gam.pred.UT_AS %>% filter(oCogRewType!="main")
+SU_UT_Results.AS <- SU_UT_Results.AS %>% filter(oCogRewType!="main")
+
+# Get a main effect model (regardless of trial type)
+
+
+SU_UT_Results.AS2 <- data.frame(
+  Substance = factor(),
+  F_value = numeric(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+gam.pred.UT_AS2 <- data.frame(
+  Substance = factor(),
+  Drug_Usetype = factor(),
+  predicted = numeric(),
+  se = numeric(),
+  lower = numeric(),
+  upper = numeric()
+)
+
+# Loop through cogRewType × Substance
+for (sub in unique(SU_Vars_Use_Long$Substance)) {
+    
+    # Subset data for this combo
+    sub_df <- SU_Vars_Use_Long[SU_Vars_Use_Long$cogRewType!="main",] %>% 
+      filter(Substance == sub)
+    
+    if (nrow(sub_df) == 0) next  # skip if no rows
+    
+    # Fit GAMM
+    model <- mgcv::gamm(
+      corrat ~ s(visit_age, k = 4, fx = FALSE, bs = "cs") + Usetype + income_recode + 
+        raceeth_recode + sex + site + cogRewType,
+      random = list(subject = ~1, subject = ~0 + visit_age),
+      data = sub_df,
+      method = "REML"
+    )
+    
+    # Extract ANOVA results
+    aov_result <- anova(model$gam)
+    F_val <- aov_result$pTerms.table[1, 2]
+    p_val <- aov_result$pTerms.table[1, 3]
+    
+    SU_UT_Results.AS2 <- rbind(
+      SU_UT_Results.AS2,
+      data.frame(
+        Substance = sub,
+        F_value = round(F_val, 2),
+        p_value = signif(p_val, 2),
+        stringsAsFactors = FALSE
+      )
+    )
+    
+    # Predictions for "Usetype"
+    get_preds <- ggpredict(model$gam, terms = c("Usetype"))
+    
+    gam.pred.UT_AS2 <- rbind(
+      gam.pred.UT_AS2,
+      data.frame(
+        Substance = sub,
+        Drug_Usetype = get_preds$x,
+        predicted = get_preds$predicted,
+        se = get_preds$std.error,
+        lower = get_preds$conf.low,
+        upper = get_preds$conf.high
+      )
+    )
+}
+
+
+gam.pred.UT_AS2$oCogRewType <- "main"
+SU_UT_Results.AS2$oCogRewType <- "main"
+gam.pred.UT_AS <- rbind(gam.pred.UT_AS, gam.pred.UT_AS2)
+SU_UT_Results.AS <- rbind(SU_UT_Results.AS, SU_UT_Results.AS2)
+
+custom_order <- c("main", "rew", "neu")
+
+custom_order2 <- c("no-use", "single-use", "co-use","poly-use")
+
+custom_order3 <- c("All Prob", "Alcohol", "Binge","Cannabis","Nicotine")
+
+# Convert to factor with levels in custom order
+SU_UT_Results.AS_All <- SU_UT_Results.AS %>%
+  mutate(oCogRewType = factor(oCogRewType, levels = custom_order)) %>%
+  mutate(Substance = factor(Substance, levels = custom_order3)) %>%
+  arrange(Substance, oCogRewType)
+
+gam.pred.UT_AS_All <- gam.pred.UT_AS %>%
+  mutate(Drug_Usetype = factor(Drug_Usetype, levels = custom_order2),
+         oCogRewType = factor(oCogRewType, levels = custom_order)) %>%
+    mutate(Substance = factor(Substance, levels = custom_order3)) %>%
+  arrange(Substance, oCogRewType, Drug_Usetype)
+
+
+write.csv(SU_UT_Results.AS_All, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Main_Effects_UsetypeCategories_Across_ASTrialTypes.csv', row.names = FALSE)
+
+write.csv(gam.pred.UT_AS_All, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/Mean_Predicted_UsetypeCategories_Across_ASTrialTypes.csv', row.names = FALSE)
+
+
+``` 
+
+#### Plots: 
+```{r, echo = FALSE, fig.align='center'}
+  
+
+# Plots showing anti-saccade performance by substance use use-type groups - model predictions adjusted for age and relevant covariates
+
+Usetype1_5 <- gam.pred.UT_AS_All %>% 
+  ggplot(aes(x = Drug_Usetype, y = predicted, fill = Substance)) +
+  facet_wrap(~oCogRewType, scales = "free")+
+  geom_point(shape = 21, size = 2.5, color = "white",position = position_dodge(0.3)) +
+  scale_fill_manual(values = substance_colorbar) +
+  labs(x = "\nUse-Type",
+       y = "Performance (% Correct)\n")+
+          scale_y_continuous(limits = c(70, 85), breaks = seq(70, 85, by = 5))+ 
+  theme(aspect.ratio = .5,
+  strip.background = element_blank(),
+  legend.position = "none",
+  axis.text = element_text(size = 8, family = "Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())
+print(Usetype1_5)
+
+ggsave(Usetype1_5, filename = "/Users/ashparr/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/AS_SU_UseTypeCat_AllTrials.pdf", device = "pdf", dpi = 500,
+       width = 8, height = 8, units = "in")#
+
+
+``` 
