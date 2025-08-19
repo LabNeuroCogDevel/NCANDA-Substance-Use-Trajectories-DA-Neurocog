@@ -1,0 +1,117 @@
+---
+title: "Participant Characteristics, Age related Trends in Performance, and other behavioral measures"
+author: Ashley C. Parr
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output: pdf_document
+---
+
+#GO 
+
+```{r, include=FALSE}
+
+if(!is.null(dev.list())) dev.off()# Clear plots
+cat("\014") # Clear console
+rm(list=ls())# Clean workspace
+
+library(extrafont)
+library(ggplot2)
+library(dplyr)
+library(tinytex)
+
+knitr::opts_chunk$set(out.width="50%", out.height="50%", warning = FALSE, 
+                      fig.pos = 'H', dev = 'png', dpi=150)
+
+
+```      
+
+# Bring in Relevant Files  
+```{r, echo=FALSE}
+
+All_Sites_Demo <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/ALL_SITES_SUBSTANCE_CLEANED_y8_newnicotine_08042025.csv" #ALL_SITES_SUBSTANCE_CLEANED_y8_newnicotine.csv
+All_Sites_Demo <- read.csv(All_Sites_Demo)
+
+
+#
+All_Sites_Demo <- dplyr::select(All_Sites_Demo, subject, visit, site, sex, visit_age,
+                                scanner, scanner_model, raceeth_recode,
+                                income_recode, education_recode,
+                                include_thres, age_at_baseline,
+                                bline_age_bin3,
+                                past_30days_all_drugs, include_thres) #%>% 
+   # filter(include_thres==1) #& !is.na(past_30days_all_drugs)) #A toggle to get demographics on all people or just those who don't exceed the drinking threshold (so included subs) and who have SU data at each visit
+
+``` 
+
+# Housekeeping
+```{r, echo=FALSE}
+
+All_Sites_Demo$raceeth_recode<-factor(All_Sites_Demo$raceeth_recode,levels=c("Asian AIAN NHPI OTHER", "Hispanic", "Non-Hispanic Black/AA", "Non-Hispanic White","Other"))
+
+All_Sites_Demo$income_recode<-factor(All_Sites_Demo$income_recode,levels=c("<25k","25k-49k","50k-74k","75k-99k","100k-199k","200k+"))
+
+All_Sites_Demo$education_recode<-factor(All_Sites_Demo$education_recode,levels=c("Grade 9","High School","College","Grad School"))
+
+All_Sites_Demo$bline_age_bin3<-factor(All_Sites_Demo$bline_age_bin3,levels=c("12-14","15-17","18-22"))
+
+# List of columns left to factorize
+columns_to_factorize <- c("subject","visit", "sex","site", 
+                          "scanner_model", "scanner","visit") 
+# Factorize columns
+for (col in columns_to_factorize) {
+  All_Sites_Demo[[col]] <- factor(All_Sites_Demo[[col]])
+} 
+
+
+```    
+
+# Demographics Summaries  
+```{r, echo = TRUE, fig.align='center'}
+
+Bline <- All_Sites_Demo[All_Sites_Demo$visit==0,]
+NCANDAwithalldemfortable<-Bline[,c("bline_age_bin3", "sex", "raceeth_recode","income_recode","education_recode","site","scanner")]
+demolist<-sapply(NCANDAwithalldemfortable, function(x) prop.table(table(x)))
+demolistdf<-do.call(rbind,lapply(demolist,function(x){data.frame(x)}))
+demolistdf$N <- formatC(length(unique(Bline$subject))*demolistdf$Freq, format = "f", digits = 0)
+demolistdf$Freq<-formatC(demolistdf$Freq*100, format = "f", digits = 2)
+print(demolistdf)
+
+
+``` 
+
+# Visit Histogram  
+```{r, echo = TRUE, fig.align='center'}
+
+hist <- ggplot(All_Sites_Demo, aes(x=visit_age,fill=visit))+geom_histogram(col="black",lwd = .20)+
+  # scale_fill_brewer("greys", direction = 1) +
+  # scale_fill_grey(start = 1, end = 0)+
+  scale_fill_grey(start = 0, end = 1)+
+  xlab("Age") +
+  ylab("Visit Count") +
+  # scale_x_continuous(breaks = c(14, 18, 22, 26, 30), limits = c(12, 30)) +
+  theme(aspect.ratio = 1,
+  legend.position = "none",
+  axis.text = element_text(size = 8, family ="Arial", color = c("black")),
+  axis.title.x = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.title.y = element_text(size = 9, family ="Arial", color = c("black")),
+  axis.line = element_line(linewidth = .2), 
+  axis.ticks = element_line(linewidth = .2),
+  panel.grid.major = element_blank(),
+  panel.grid.minor=element_blank(),
+  panel.background=element_blank())+
+    guides(fill=guide_legend(title="Visit"))
+print(hist)
+
+``` 
+
+# Save out
+```{r, echo = TRUE, fig.align='center'}
+
+#Save demographics table 
+write.csv(demolistdf, file='/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Figs/2025/Demo_Table.csv', row.names = FALSE)
+
+#Save hist
+ggsave("/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Results 2025/Visit_Hist.pdf", hist, device = pdf, dpi = 500, width = 2, height = 2)#, units = "mm")
+ 
+
+``` 
+ 
