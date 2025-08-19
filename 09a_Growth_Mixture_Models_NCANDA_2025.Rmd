@@ -1,0 +1,327 @@
+---
+title: "Growth Mixture Models and Outputs"
+author: "Ashley Parr"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output: pdf_document
+---
+
+# SETUP 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+if(!is.null(dev.list())) dev.off()# Clear plots
+cat("\014") # Clear console
+rm(list=ls())# Clean workspace
+# 
+
+library(jtools)
+library(scipub)
+library(rlang) 
+library(rmarkdown)
+library(tinytex)
+library(Rmisc)
+library(dbplyr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(LNCDR)
+library(lme4)
+library(tvem)
+library(car)
+library(mgcv)
+library(readr)
+library(RColorBrewer)
+library(lcmm)
+library(lattice)
+library(flexmix)
+library(gridExtra)
+
+knitr::opts_chunk$set(out.width="50%", out.height="50%", warning = FALSE, 
+                      fig.pos = 'H', dev = 'png', dpi=150)
+
+library(showtext)
+font_add("Arial", "/Users/ashley/Fonts/Arial.ttf")  # Use the actual file path
+showtext_auto()
+
+```
+
+# IMPORT DATA 
+
+```{r, echo=FALSE}
+#
+All_Sites_Substance <- "/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/DATA/ALL_SITES_SUBSTANCE_Merged_10012025.csv"
+All_Sites_Substance <- read.csv(All_Sites_Substance)
+# 
+
+substance <- dplyr::select(All_Sites_Substance, subject, visit,                         
+                           sex, raceeth_recode, site, income_recode, 
+                           contains("30days"), 
+                          visit_age, 
+                                     age_at_baseline, bline_age_bin3, bline_age_bin3_bin)
+
+ 
+
+color <- as.factor(substance$bline_age_bin3_bin)
+
+```
+
+# What trajectories
+
+```{r, echo=FALSE}
+
+#####Which trajectories do you want to look at##### 
+substance$var <- substance$log_p1_past_30days_prob
+
+
+#Plots some things 
+xyplot(var ~ visit_age, substance, groups = subject, col=color, lwd=2, type="l")  
+ 
+#young
+xyplot(var ~ visit_age, substance[substance$bline_age_bin3_bin==0,], groups = subject, lwd=2, type="l") 
+
+#mid
+xyplot(var ~ visit_age, substance[substance$bline_age_bin3_bin==1,], groups = subject, lwd=2, type="l") 
+
+#old
+xyplot(var ~ visit_age, substance[substance$bline_age_bin3_bin==2,], groups = subject, lwd=2, type="l") 
+ 
+ 
+substance$center_age <- scale(substance$visit_age, center = TRUE, scale = FALSE)
+substance$center_age_at_baseline <- scale(substance$age_at_baseline, center = TRUE, scale = FALSE)
+
+``` 
+
+
+# SUBSTANCE TRAJECTORIES  
+
+## GMM Analyses with random intercept per class 
+``` {r smooth sig, warning = FALSE}
+
+
+set.seed(2002)
+ 
+# random intercept per class: i.e. a fixed mean intercept
+# with normally distributed intercept variance around it. 
+
+# ONE CLASS:
+
+all_gmm_1c <- hlme(var ~
+                        center_age+I(center_age^2)+ center_age_at_baseline, #+sex + 
+                     # site + raceeth_recode + income_recode,
+                   random = ~1,
+                   subject = 'subject', ng = 1,  
+                   data = substance) 
+summary(all_gmm_1c)
+
+temp <- dplyr::select(all_gmm_1c$pprob, subject, class)
+colnames(temp)[colnames(temp)=="class"] <- "all_gmm_1c_class"
+mod_classes_all <- merge(mod_classes_all, temp, by="subject")
+
+# TWO CLASSES:
+all_gmm_2c <- hlme(var ~
+                        center_age+I(center_age^2) + center_age_at_baseline,# + sex + 
+                      # site + raceeth_recode + income_recode,
+                    random = ~1,   
+                    subject = 'subject',
+                    data = substance, 
+                    ng = 2, mixture=~center_age+I(center_age^2),
+                    B=all_gmm_1c, nwg = T)
+summary(all_gmm_2c)
+#
+temp <- dplyr::select(all_gmm_2c$pprob, subject, class)
+colnames(temp)[colnames(temp)=="class"] <- "all_gmm_2c_class"
+mod_classes_all <- merge(mod_classes_all, temp, by="subject")
+
+
+# THREE CLASSES:
+all_gmm_3c <- hlme(var ~
+                        center_age+I(center_age^2) + center_age_at_baseline,# + sex + 
+                      # site + raceeth_recode + income_recode,
+                    random = ~1,   
+                    subject = 'subject',
+                    data = substance, 
+                    ng = 3, mixture=~center_age+I(center_age^2),
+                    B=all_gmm_1c, nwg = T)
+summary(all_gmm_3c)
+# 
+temp <- dplyr::select(all_gmm_3c$pprob, subject, class)
+colnames(temp)[colnames(temp)=="class"] <- "all_gmm_3c_class"
+mod_classes_all <- merge(mod_classes_all, temp, by="subject")
+#  
+#FOUR CLASSES
+all_gmm_4c <- hlme(var ~
+                        center_age+I(center_age^2) + center_age_at_baseline,# + sex + 
+                      # site + raceeth_recode + income_recode,
+                   random = ~1, 
+                   subject = 'subject',
+                   data = substance, 
+                   ng = 4, mixture=~center_age+I(center_age^2),
+                   B=all_gmm_1c, nwg = T)
+
+summary(all_gmm_4c)
+# 
+temp <- dplyr::select(all_gmm_4c$pprob, subject, class)
+colnames(temp)[colnames(temp)=="class"] <- "all_gmm_4c_class"
+mod_classes_all <- merge(mod_classes_all, temp, by="subject")
+# 
+# # Turn on for final 
+# all_gmm_2gc <- gridsearch(hlme(var ~
+#                         center_age+I(center_age^2) + center_age_at_baseline + sex + 
+#                       site + raceeth_recode + income_recode,
+#                     random = ~1,
+#                     subject = 'subject',
+#                     data = substance,
+#                     ng = 2, mixture=~center_age+I(center_age^2), nwg = T),
+#                     rep = 100, maxiter = 30, minit = all_gmm_1c)
+# summary(all_gmm_2gc)
+# #
+# #
+# temp <- dplyr::select(all_gmm_2gc$pprob, subject, class)
+# colnames(temp)[colnames(temp)=="class"] <- "all_gmm_2gc_class"
+# mod_classes_all <- merge(mod_classes_all, temp, by="subject")
+# 
+# # #
+# #
+# all_gmm_3gc <- gridsearch(hlme(var ~ center_age+I(center_age^2) + center_age_at_baseline + sex + 
+#                       site + raceeth_recode + income_recode,
+#                     random = ~1,
+#                     subject = 'subject',
+#                     data = substance,
+#                     ng = 3, mixture=~center_age+I(center_age^2), nwg = T),
+#                     rep = 100, maxiter = 30, minit = all_gmm_1c)
+# summary(all_gmm_3gc)
+# #
+# #
+# temp <- dplyr::select(all_gmm_3gc$pprob, subject, class)
+# colnames(temp)[colnames(temp)=="class"] <- "all_gmm_3gc_class"
+# mod_classes_all <- merge(mod_classes_all, temp, by="subject")
+# #
+# #
+# all_gmm_4gc <- gridsearch(hlme(var ~ center_age+I(center_age^2) + center_age_at_baseline + sex + 
+#                       site + raceeth_recode + income_recode,
+#                     random = ~1,
+#                     subject = 'subject',
+#                     data = substance,
+#                     ng = 4, mixture=~center_age+I(center_age^2), nwg = T),
+#                     rep = 100, maxiter = 30, minit = all_gmm_1c)
+# summary(all_gmm_4gc)
+# #
+# #
+# temp <- dplyr::select(all_gmm_4gc$pprob, subject, class)
+# colnames(temp)[colnames(temp)=="class"] <- "all_gmm_4gc_class"
+# mod_classes_all <- merge(mod_classes_all, temp, by="subject")
+
+# 
+summaryplot(all_gmm_1c, all_gmm_2c, all_gmm_3c, all_gmm_4c,
+            which = c("BIC", "AIC","entropy","ICL"))
+
+sum_table_all_gmm <- data.frame(summarytable(all_gmm_1c, all_gmm_2c,
+                                                all_gmm_3c, all_gmm_4c,
+                                                which = c("G", "loglik", "conv",
+                                                          "npm", "AIC", "BIC",
+                                                          "SABIC", "entropy","ICL",
+                                                          "%class")))
+
+min_index <- which.min(sum_table_all_gmm$BIC)
+best_model <- eval(parse(text=rownames(sum_table_all_gmm[min_index,])))
+n <- best_model$pprob%>%group_by(class)%>%tally()
+
+
+gg_all_gmm_quad <- ggplot(data = merge(substance, best_model$pprob, by='subject') %>% arrange(visit_age), aes(x=visit_age, y=var, color=as.factor(class))) + geom_point(alpha=.25) + 
+  scale_color_manual(values=c("red","navy","purple","black")) +
+  scale_fill_manual(values=c("red","navy","purple","black"))+
+stat_smooth(aes(group=as.factor(class), fill=as.factor(class)),alpha=.4,
+            method='lm', formula=y~poly(x,2)) +   
+geom_path(aes(group=subject), alpha=0.1) +   
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"))+
+      # scale_y_continuous(trans="reverse")+
+    labs(y="Past year binge drink (log+2)", x="Age")
+print(gg_all_gmm_quad)
+
+
+hist <- ggplot(data = merge(substance, best_model$pprob, by='subject') %>% 
+                 arrange(visit_age),  aes(x=visit_age,fill=as.factor(class)))+geom_histogram()+
+  scale_color_manual(values=c("red","navy","purple","black")) +
+  scale_fill_manual(values=c("red","navy","purple","black"))+
+  theme(aspect.ratio = 1, panel.background = element_blank(), axis.line=element_line(colour="black")) +
+  guides(fill=guide_legend(title="Class"))
+
+
+
+gg_all_gmm_gamm <- ggplot(data = merge(substance, best_model$pprob, by='subject') %>% arrange(visit_age), aes(x=visit_age, y=var, color=as.factor(class))) + geom_point(alpha=.25) + 
+  scale_color_manual(values=c("red","navy","purple","black")) +
+  scale_fill_manual(values=c("red","navy","purple","black"))+
+stat_smooth(aes(group=as.factor(class), fill=as.factor(class)),alpha=.4,
+            method='gam', formula=y~s(x, k=3)) +   
+geom_path(aes(group=subject), alpha=0.1) +   
+  theme(panel.background = element_blank(),
+        axis.line=element_line(colour="black"))+
+      # scale_y_continuous(trans="reverse")+
+    labs(y="Past year binge drink (log+1)", x="Age")
+ print(gg_all_gmm_gamm)
+ 
+   
+
+# Predictions of the trajectories
+# Class-specific predictions can be computed for any data contained in a dataframe as soon as all the covariates specified in the model are included in the dataframe. In the next lines, such a dataframe is created by generating a vector of age
+
+data_pred0 <- data.frame(visit_age=seq(12,30, length.out=50))
+data_pred0$center_age <- (data_pred0$visit_age - mean(data_pred0$visit_age))
+data_pred0$age_at_baseline <- seq(12,22, length.out=50)
+data_pred0$center_age_at_baseline <- scale(data_pred0$age_at_baseline, center = TRUE, scale = FALSE)
+
+# Predictions are computed for each class at the point estimate:
+
+pred0 <- predictY(best_model, data_pred0, var.time = "visit_age")
+mm <- cbind(data_pred0, pred0$pred)
+
+# Predictions can then be plotted:
+ 
+plot(pred0, col=c("red","navy","purple","black"), lty=1,lwd=5,ylab="Binge past year",legend=NULL,  main="Predicted trajectories for binge drinking ") #,ylim=c(0,100)
+# legend(x="topright",legend=c("class1 :","CEP-","CEP+","class2:","CEP-","CEP+"), col=c(rep("red",3),rep("navy",3)), lwd=2, lty=c(0,1,2,0,1,2), ncol=2, bty="n", cex = 0.7)
+
+# If we want to have a sense of the variability, we can compute the predictions with confidence intervals and plot them:
+
+predIC0 <- predictY(best_model, data_pred0, var.time = "visit_age",draws=TRUE)
+# predIC1 <- predictY(m2d, data_pred1, var.time = "age",draws=TRUE)
+plot(predIC0, col=c("red", "navy","purple","black"), lty=1, lwd=2, ylab="binge drinking", main="Predicted trajectories for binge drinking", shades=TRUE, legend=NULL)
+ 
+#Finally, the predicted trajectories for 1-, 2- and 3-class models can be represented together in the following graph:
+
+predG1 <- predictY(all_gmm_1c, data_pred0, var.time = "visit_age", draws=TRUE)
+predG2 <- predictY(all_gmm_2c, data_pred0, var.time = "visit_age", draws=TRUE)
+predG3 <- predictY(all_gmm_3c, data_pred0, var.time = "visit_age", draws=TRUE)
+predG4 <- predictY(all_gmm_4c, data_pred0, var.time = "visit_age", draws=TRUE)
+
+par(mfrow=c(1,4))
+plot(predG1, col=1, lty=1, lwd=2, ylab="Binge", legend=NULL, main="Predicted trajectories G=1",shades=TRUE)#,ylim=c(0,100)
+plot(predG2, col=c("red","navy"), lty=1, lwd=2,ylab="Binge", legend=NULL, main="Predicted trajectories G=2",shades=TRUE) #ylim=c(0,100)
+plot(predG3, col=c("red","purple","navy"), lty=1, lwd=2, ylab="Binge", legend=NULL, main="Predicted trajectories G=3",shades=TRUE) #, ylim=c(0,100)
+plot(predG4, col=c("red","purple","navy","black"), lty=1, lwd=2, ylab="Binge", legend=NULL, main="Predicted trajectories G=4",shades=TRUE) #, ylim=c(0,100)
+
+
+## Evaluation of the final latent class mixed model
+## Plot of the residuals
+plot(best_model, cex.main=0.8)
+
+## Graph of the predictions versus observations
+## In order to evaluate the fit of the selected model, we plot simultaneously the observations and the predicted values for each latent class.
+
+plot(best_model, col=c("red","navy","purple","black"),which="fit", var.time="visit_age", marg=FALSE, shades = TRUE, legend = NULL)
+
+## The graph shows here the very good fit to the data.  
+## Classification
+## The posterior classification of the model is obtained with:
+postprob(best_model)
+
+
+
+```   
+
+### Merge/Save out model outputs 
+``` {r smooth sig, warning = FALSE}
+save(mod_classes_all, file="/Users/ashparr/Library/Mobile Documents/com~apple~CloudDocs/Documents/Pitt/Manuscripts & Projects/NCANDA Project/Model Outputs 2023/All_Models_past30prob_raw.RData")
+``` 
+
